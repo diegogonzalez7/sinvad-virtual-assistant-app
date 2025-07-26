@@ -1,0 +1,776 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, TouchableOpacity, FlatList, TextInput, Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
+import styles from './styles';
+
+// Configuración WebSocket
+const WS_URL = 'ws://localhost:8080'; // Reemplazar con IP local si se usa dispositivo físico, ej. ws://192.168.1.100:8080
+const PIN = '123456';
+
+// Función para procesar un flujo
+function processFlow(flow) {
+  const stepNameToId = {};
+  flow.steps.forEach(step => {
+    stepNameToId[step.name[0].text] = step.id;
+    stepNameToId[step.title[0].text] = step.id;
+  });
+
+  const graph = {};
+  flow.nextSteps.forEach(transition => {
+    const { prevStep, nextStep, conditions } = transition;
+    if (!graph[prevStep]) graph[prevStep] = [];
+    graph[prevStep].push({ nextStep, conditions });
+  });
+
+  return { stepNameToId, graph };
+}
+
+// Función para parsear opciones dentro de los chips
+function parseOptions(questionText, stepNameToId, nextSteps) {
+  const options = [];
+  const regex = /::chip::([^:]+)::text::([^:]+)::chip::/g;
+  let match;
+  while ((match = regex.exec(questionText)) !== null) {
+    const optionText = match[1].trim();
+    const nextStepName = match[2].trim();
+    const nextStepId = stepNameToId[nextStepName] || nextStepName;
+    options.push({ text: optionText, nextStep: nextStepId });
+  }
+  if (!regex.test(questionText) && nextSteps.some(t => t.nextStep !== "0")) {
+    const nextStep = nextSteps.find(t => t.conditions === "-");
+    if (nextStep) {
+      options.push({ text: "Continuar", nextStep: nextStep.nextStep, isTextInput: true });
+    }
+  }
+  return options;
+}
+
+// Función para limpiar el texto de las opciones de chip
+function cleanAssistantMessage(questionText) {
+  return questionText.replace(/::chip::[^:]+::text::[^:]+::chip::/g, '').trim();
+}
+
+// Función para encontrar un paso por ID
+function findStep(stepId, flow) {
+  return flow.steps.find(step => step.id === stepId);
+}
+
+// Función para encontrar el siguiente paso
+function findNextStep(currentStepId, selectedOptionText, flow, graph, stepNameToId, isTextInput = false) {
+  const step = findStep(currentStepId, flow);
+  const options = step ? parseOptions(step.question[0].text, stepNameToId, graph[currentStepId] || []) : [];
+  const transitions = graph[currentStepId] || [];
+
+  if (!selectedOptionText && options.length === 0) {
+    const transition = transitions.find(t => t.conditions === "-");
+    return transition ? transition.nextStep : null;
+  }
+
+  if (isTextInput && options[0]?.isTextInput) {
+    return options[0].nextStep;
+  }
+
+  const selectedOption = options.find(opt => 
+    opt.text.toLowerCase() === selectedOptionText?.toLowerCase()
+  );
+
+  if (!selectedOption) {
+    console.log(`Debug: No se encontró la opción "${selectedOptionText}"`);
+    return null;
+  }
+
+  let transition = transitions.find(t => t.nextStep === selectedOption.nextStep);
+  if (!transition) {
+    transition = transitions.find(t => t.conditions === "-");
+    if (!transition) {
+      console.log(`Debug: No se encontró transición para prevStep=${currentStepId}, nextStep=${selectedOption.nextStep}`);
+      return null;
+    }
+  }
+
+  return transition.nextStep;
+}
+
+// Función para guardar informe en AsyncStorage
+async function saveReport(flowId, flowName, history) {
+  try {
+    const report = {
+      flowId,
+      flowName,
+      history,
+      timestamp: new Date().toISOString(),
+      estado: 'Pendiente',
+    };
+    const existingReports = JSON.parse(await AsyncStorage.getItem('reports') || '[]');
+    await AsyncStorage.setItem('reports', JSON.stringify([...existingReports, report]));
+    return report;
+  } catch (error) {
+    console.log('Error saving report:', error);
+    throw error;
+  }
+}
+
+// Función para marcar informe como sincronizado
+async function markReportAsSynchronized(reports, setReports, timestamp) {
+  try {
+    const updatedReports = reports.map(report => 
+      report.timestamp === timestamp ? { ...report, estado: 'Sincronizado' } : report
+    );
+    await AsyncStorage.setItem('reports', JSON.stringify(updatedReports));
+    setReports(updatedReports);
+  } catch (error) {
+    console.log('Error marking report as synchronized:', error);
+  }
+}
+
+// Función para obtener informes
+async function getReports(setReports, flowId = null) {
+  try {
+    const reports = JSON.parse(await AsyncStorage.getItem('reports') || '[]');
+    if (flowId) {
+      const filteredReports = reports.filter(report => report.flowId === flowId);
+      setReports(filteredReports);
+    } else {
+      setReports(reports);
+    }
+  } catch (error) {
+    console.log('Error fetching reports:', error);
+    Alert.alert('Error', 'No se pudieron cargar los informes.');
+  }
+}
+
+// Función para obtener el último informe
+async function getLatestReport(flowId, setSelectedReport) {
+  try {
+    const reports = JSON.parse(await AsyncStorage.getItem('reports') || '[]');
+    const filteredReports = reports.filter(report => report.flowId === flowId);
+    const latestReport = filteredReports.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
+    setSelectedReport(latestReport || null);
+  } catch (error) {
+    console.log('Error fetching latest report:', error);
+    Alert.alert('Error', 'No se pudo cargar el último informe.');
+  }
+}
+
+// Función para limpiar todos los informes
+async function clearReports(setReports) {
+  try {
+    await AsyncStorage.removeItem('reports');
+    setReports([]);
+    Alert.alert('Éxito', 'Todos los informes han sido eliminados.');
+  } catch (error) {
+    console.log('Error limpiando informes:', error);
+    Alert.alert('Error', 'No se pudieron limpiar los informes.');
+  }
+}
+
+// Función para guardar flujos en AsyncStorage
+async function saveFlowsToStorage(flows) {
+  try {
+    const data = {
+      flows,
+      timestamp: new Date().toISOString(),
+    };
+    await AsyncStorage.setItem('flows', JSON.stringify(data));
+    console.log('Flujos guardados en AsyncStorage:', flows.length);
+  } catch (error) {
+    console.log('Error guardando flujos:', error);
+  }
+}
+
+// Función para cargar flujos desde AsyncStorage
+async function loadFlowsFromStorage() {
+  try {
+    const data = await AsyncStorage.getItem('flows');
+    if (data) {
+      const parsed = JSON.parse(data);
+      return parsed.flows.sort((a, b) => a.title[0].text.localeCompare(b.title[0].text));
+    }
+    return null;
+  } catch (error) {
+    console.log('Error cargando flujos:', error);
+    return null;
+  }
+}
+
+// Función para verificar si los flujos necesitan actualización
+function needsUpdate(timestamp) {
+  if (!timestamp) return true;
+  const lastUpdate = new Date(timestamp);
+  const now = new Date();
+  const hoursSinceUpdate = (now - lastUpdate) / (1000 * 60 * 60);
+  return hoursSinceUpdate > 24;
+}
+
+export default function App() {
+  const [flows, setFlows] = useState([]);
+  const [selectedFlow, setSelectedFlow] = useState(null);
+  const [currentStepId, setCurrentStepId] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [inputValue, setInputValue] = useState('');
+  const [reports, setReports] = useState([]);
+  const [showReports, setShowReports] = useState(false);
+  const [selectedReport, setSelectedReport] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isConnected, setIsConnected] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const ws = useRef(null);
+  const reconnectAttempts = useRef(0);
+  const maxReconnectAttempts = 5;
+  const tempFlows = useRef([]); // Lista temporal para acumular flujos
+
+  // Manejar conexión WebSocket
+  const connectWebSocket = () => {
+    ws.current = new WebSocket(WS_URL);
+
+    ws.current.onopen = () => {
+      console.log('WebSocket conectado');
+      reconnectAttempts.current = 0;
+      setIsConnected(true);
+      ws.current.send(JSON.stringify({ type: 'PIN', data: PIN }));
+    };
+
+    ws.current.onmessage = async (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        console.log('Mensaje recibido:', message); // Depuración
+        switch (message.type) {
+          case 'AUTH_OK':
+            console.log('Autenticación exitosa');
+            setIsAuthenticated(true);
+            ws.current.send(JSON.stringify({ type: 'GET_FLOWS' }));
+            break;
+          case 'AUTH_ERROR':
+            console.log('Error de autenticación: PIN incorrecto');
+            alert('PIN incorrecto');
+            setIsConnected(false);
+            ws.current.close();
+            break;
+          case 'FLOW':
+            console.log('Flujo recibido:', message.data.id); // Depuración
+            tempFlows.current = [
+              ...tempFlows.current.filter(f => f.id !== message.data.id),
+              message.data
+            ].sort((a, b) => a.title[0].text.localeCompare(b.title[0].text));
+            setFlows(tempFlows.current); // Actualizar flows inmediatamente
+            await saveFlowsToStorage(tempFlows.current);
+            break;
+          case 'FLOW_REMOVED':
+            console.log('Flujo eliminado:', message.data); // Depuración
+            tempFlows.current = tempFlows.current.filter(flow => flow.id !== message.data);
+            setFlows(tempFlows.current);
+            await AsyncStorage.setItem('flows', JSON.stringify({ flows: tempFlows.current, timestamp: new Date().toISOString() }));
+            break;
+          case 'ALL_FLOWS_SENT':
+            console.log('Todos los flujos enviados, actualizando estado:', tempFlows.current); // Depuración
+            setFlows(tempFlows.current);
+            await saveFlowsToStorage(tempFlows.current);
+            setIsLoading(false);
+            break;
+          case 'REPORT_SAVED':
+            console.log(`Informe guardado en backend: ${message.data}`);
+            await markReportAsSynchronized(reports, setReports, message.data);
+            break;
+          case 'PARTIAL_FLOW_SAVED':
+            console.log(`Flujo parcial guardado: ${message.data}`);
+            break;
+          case 'ERROR':
+            console.log(`Error del servidor: ${message.data}`);
+            alert(`Error: ${message.data}`);
+            break;
+          default:
+            console.log('Mensaje desconocido:', message);
+        }
+      } catch (err) {
+        console.log('Error parsing WebSocket message:', err);
+      }
+    };
+
+    ws.current.onclose = () => {
+      console.log('WebSocket desconectado');
+      setIsConnected(false);
+      setIsAuthenticated(false);
+      if (reconnectAttempts.current < maxReconnectAttempts) {
+        reconnectAttempts.current += 1;
+        console.log(`Intento de reconexión ${reconnectAttempts.current}/${maxReconnectAttempts}`);
+        setTimeout(connectWebSocket, 5000 * reconnectAttempts.current);
+      }
+    };
+
+    ws.current.onerror = (err) => {
+      console.log('Error WebSocket:', err);
+    };
+  };
+
+  // Inicializar aplicación
+  useEffect(() => {
+    const initializeApp = async () => {
+      setIsLoading(true);
+
+      // Cargar flujos desde AsyncStorage
+      const storedFlows = await loadFlowsFromStorage();
+      if (storedFlows) {
+        setFlows(storedFlows);
+        tempFlows.current = storedFlows;
+        setIsLoading(false);
+      }
+
+      // Verificar conexión
+      const netInfo = await NetInfo.fetch();
+      setIsConnected(netInfo.isConnected);
+
+      // Conectar WebSocket si hay conexión
+      if (netInfo.isConnected) {
+        connectWebSocket();
+      } else if (!storedFlows) {
+        setIsLoading(false);
+      }
+
+      // Escuchar cambios de conexión
+      const unsubscribe = NetInfo.addEventListener(state => {
+        setIsConnected(state.isConnected);
+        if (state.isConnected && (!ws.current || ws.current.readyState === WebSocket.CLOSED)) {
+          connectWebSocket();
+        }
+      });
+
+      return () => unsubscribe();
+    };
+
+    initializeApp();
+
+    return () => {
+      if (ws.current) {
+        ws.current.close();
+        ws.current = null;
+      }
+    };
+  }, []);
+
+  // Sincronizar informes al reconectar
+  useEffect(() => {
+    const syncData = async () => {
+      if (isConnected && ws.current && ws.current.readyState === WebSocket.OPEN && isAuthenticated) {
+        // Sincronizar informes pendientes
+        const reports = JSON.parse(await AsyncStorage.getItem('reports') || '[]');
+        const pendingReports = reports.filter(report => report.estado === 'Pendiente');
+        for (const report of pendingReports) {
+          ws.current.send(JSON.stringify({ type: 'REPORT', data: report }));
+        }
+      }
+    };
+    syncData();
+  }, [isConnected, isAuthenticated]);
+
+  // Seleccionar un flujo
+  const handleSelectFlow = (flow) => {
+    setSelectedFlow(flow);
+    setCurrentStepId(null);
+    setHistory([]);
+    setMessages([]);
+    setInputValue('');
+    setShowReports(false);
+    setSelectedReport(null);
+  };
+
+  // Iniciar el flujo
+  const handleStartFlow = () => {
+    const initialStep = findStep(selectedFlow.stepID, selectedFlow);
+    setCurrentStepId(selectedFlow.stepID);
+    if (initialStep) {
+      setMessages([
+        {
+          id: Date.now(),
+          text: `${initialStep.description[0].text}\n${cleanAssistantMessage(initialStep.question[0].text)}`,
+          isUser: false,
+        },
+      ]);
+    }
+  };
+
+  // Manejar selección de opción o entrada de texto
+  const handleOptionPress = (optionText) => {
+    const { stepNameToId, graph } = processFlow(selectedFlow);
+    const step = findStep(currentStepId, selectedFlow);
+    const options = step ? parseOptions(step.question[0].text, stepNameToId, graph[currentStepId] || []) : [];
+    const isTextInput = options.length > 0 && options[0].isTextInput;
+    const nextStepId = findNextStep(currentStepId, isTextInput ? "Continuar" : optionText, selectedFlow, graph, stepNameToId, isTextInput);
+
+    if (nextStepId) {
+      setMessages(prev => [...prev, { id: Date.now(), text: isTextInput ? optionText : optionText, isUser: true }]);
+      const newHistory = [...history, { stepId: currentStepId, stepTitle: step.title[0].text, option: isTextInput ? optionText : optionText }];
+      setHistory(newHistory);
+      setCurrentStepId(nextStepId);
+      setInputValue('');
+
+      // Guardar flujo parcial en backend
+      if (isConnected && ws.current && ws.current.readyState === WebSocket.OPEN) {
+        ws.current.send(JSON.stringify({
+          type: 'PARTIALFLOW',
+          data: { flowId: selectedFlow.id, stepId: currentStepId, responses: newHistory }
+        }));
+      }
+
+      const nextStep = findStep(nextStepId, selectedFlow);
+      if (nextStepId !== "0" && nextStep) {
+        setMessages(prev => [
+          ...prev,
+          {
+            id: Date.now() + 1,
+            text: `${nextStep.description[0].text}\n${cleanAssistantMessage(nextStep.question[0].text)}`,
+            isUser: false,
+          },
+        ]);
+      } else if (nextStepId === "0") {
+        // Guardar informe
+        saveReport(selectedFlow.id, selectedFlow.title[0].text, newHistory).then(report => {
+          if (isConnected && ws.current && ws.current.readyState === WebSocket.OPEN) {
+            ws.current.send(JSON.stringify({ type: 'REPORT', data: report }));
+          }
+        });
+      }
+    } else {
+      Alert.alert('Error', 'No se encontró el siguiente paso. Verifica la configuración del flujo.');
+      console.log(`Debug: No se encontró nextStepId para currentStepId=${currentStepId}, optionText=${optionText}, isTextInput=${isTextInput}`);
+    }
+  };
+
+  // Manejar botón "Continuar" para estados finales
+  const handleContinue = () => {
+    const { stepNameToId, graph } = processFlow(selectedFlow);
+    const step = findStep(currentStepId, selectedFlow);
+    const nextStepId = findNextStep(currentStepId, null, selectedFlow, graph, stepNameToId);
+
+    if (nextStepId) {
+      const newHistory = [...history, { stepId: currentStepId, stepTitle: step.title[0].text, option: 'Continuar' }];
+      setHistory(newHistory);
+      setCurrentStepId(nextStepId);
+
+      // Guardar flujo parcial en backend
+      if (isConnected && ws.current && ws.current.readyState === WebSocket.OPEN) {
+        ws.current.send(JSON.stringify({
+          type: 'PARTIALFLOW',
+          data: { flowId: selectedFlow.id, stepId: currentStepId, responses: newHistory }
+        }));
+      }
+
+      const nextStep = findStep(nextStepId, selectedFlow);
+      if (nextStepId !== "0" && nextStep) {
+        setMessages(prev => [
+          ...prev,
+          {
+            id: Date.now(),
+            text: `${nextStep.description[0].text}\n${cleanAssistantMessage(nextStep.question[0].text)}`,
+            isUser: false,
+          },
+        ]);
+      } else if (nextStepId === "0") {
+        // Guardar informe
+        saveReport(selectedFlow.id, selectedFlow.title[0].text, newHistory).then(report => {
+          if (isConnected && ws.current && ws.current.readyState === WebSocket.OPEN) {
+            ws.current.send(JSON.stringify({ type: 'REPORT', data: report }));
+          }
+        });
+      }
+    } else {
+      Alert.alert('Error', 'No se encontró el siguiente paso.');
+    }
+  };
+
+  // Mostrar pantalla de informes filtrados por flujo o todos
+  const handleShowReports = (flowId = null) => {
+    getReports(setReports, flowId);
+    setShowReports(true);
+  };
+
+  // Mostrar el último informe
+  const handleShowLatestReport = () => {
+    getLatestReport(selectedFlow.id, setSelectedReport);
+  };
+
+  // Pantalla de carga
+  if (isLoading) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Cargando flujos...</Text>
+      </View>
+    );
+  }
+
+  // Pantalla de selección de flujo
+  if (!selectedFlow && !showReports && !selectedReport) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.connectionStatus}>
+          <Text style={[styles.connectionText, isConnected ? styles.connected : styles.disconnected]}>
+            {isConnected ? 'Conectado' : 'Sin conexión'}
+          </Text>
+        </View>
+        {flows.length === 0 ? (
+          <Text style={styles.noReportText}>No hay flujos disponibles. Verifica la conexión con el servidor.</Text>
+        ) : (
+          <>
+            <Text style={styles.title}>Selecciona un flujo</Text>
+            <FlatList
+              data={flows}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.flowButton}
+                  onPress={() => handleSelectFlow(item)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.buttonText}>{item.title[0].text}</Text>
+                </TouchableOpacity>
+              )}
+            />
+            <TouchableOpacity
+              style={styles.allReportsButton}
+              onPress={() => handleShowReports()}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.buttonText}>Ver Todos los Informes</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.clearReportsButton}
+              onPress={() => clearReports(setReports)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.buttonText}>Limpiar Informes</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+    );
+  }
+
+  // Pantalla intermedia: descripción del flujo y opciones
+  if (selectedFlow && !currentStepId && !showReports && !selectedReport) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.connectionStatus}>
+          <Text style={[styles.connectionText, isConnected ? styles.connected : styles.disconnected]}>
+            {isConnected ? 'Conectado' : 'Sin conexión'}
+          </Text>
+        </View>
+        <Text style={styles.flowTitle}>{selectedFlow.title[0].text}</Text>
+        <Text style={styles.flowDescription}>
+          {selectedFlow.description?.[0]?.text || 'Descripción no disponible.'}
+        </Text>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={handleStartFlow}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.buttonText}>Crear Informe</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={() => handleShowReports(selectedFlow.id)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.buttonText}>Ver Informes</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={handleShowLatestReport}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.buttonText}>Ver Último Informe</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => setSelectedFlow(null)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.buttonText}>Volver</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // Pantalla de informes (filtrados por flujo o todos)
+  if (showReports) {
+    const title = selectedFlow ? `Informes de ${selectedFlow.title[0].text}` : 'Todos los Informes';
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>{title}</Text>
+        {reports.length === 0 ? (
+          <Text style={styles.noReportText}>No hay informes disponibles.</Text>
+        ) : (
+          <FlatList
+            data={reports}
+            keyExtractor={(item, index) => index.toString()}
+            renderItem={({ item }) => (
+              <View style={styles.historyItem}>
+                <Text style={styles.historyText}>
+                  Flujo: {item.flowName} ({item.timestamp}) - Estado: {item.estado}
+                </Text>
+                <FlatList
+                  data={item.history}
+                  keyExtractor={(step, index) => index.toString()}
+                  renderItem={({ item: step }) => (
+                    <Text style={styles.historySubText}>
+                      - Paso: {step.stepTitle}, Respuesta: {step.option}
+                    </Text>
+                  )}
+                />
+              </View>
+            )}
+          />
+        )}
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => setShowReports(false)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.buttonText}>Volver</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // Pantalla de último informe
+  if (selectedReport) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Último Informe de {selectedFlow.title[0].text}</Text>
+        {selectedReport ? (
+          <View style={styles.historyItem}>
+            <Text style={styles.historyText}>
+              Flujo: {selectedReport.flowName} ({selectedReport.timestamp}) - Estado: {selectedReport.estado}
+            </Text>
+            <FlatList
+              data={selectedReport.history}
+              keyExtractor={(step, index) => index.toString()}
+              renderItem={({ item: step }) => (
+                <Text style={styles.historySubText}>
+                  - Paso: {step.stepTitle}, Respuesta: {step.option}
+                </Text>
+              )}
+            />
+          </View>
+        ) : (
+          <Text style={styles.noReportText}>No hay informes disponibles para este flujo.</Text>
+        )}
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => setSelectedReport(null)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.buttonText}>Volver</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // Pantalla final con historial
+  if (currentStepId === "0") {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Flujo finalizado</Text>
+        <Text style={styles.subtitle}>Historial de respuestas:</Text>
+        <FlatList
+          data={history}
+          keyExtractor={(item, index) => index.toString()}
+          renderItem={({ item }) => (
+            <View style={styles.historyItem}>
+              <Text style={styles.historyText}>
+                Paso: {item.stepTitle} - Respuesta: {item.option}
+              </Text>
+            </View>
+          )}
+        />
+        <TouchableOpacity
+          style={styles.restartButton}
+          onPress={() => {
+            setSelectedFlow(null);
+            setHistory([]);
+            setMessages([]);
+            setInputValue('');
+            setShowReports(false);
+            setSelectedReport(null);
+          }}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.buttonText}>Volver a seleccionar flujo</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // Pantalla de chat
+  const step = findStep(currentStepId, selectedFlow);
+  const options = step ? parseOptions(step.question[0].text, processFlow(selectedFlow).stepNameToId, processFlow(selectedFlow).graph[currentStepId] || []) : [];
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.connectionStatus}>
+        <Text style={[styles.connectionText, isConnected ? styles.connected : styles.disconnected]}>
+          {isConnected ? 'Conectado' : 'Sin conexión'}
+        </Text>
+      </View>
+      <FlatList
+        data={messages}
+        keyExtractor={(item) => item.id.toString()}
+        renderItem={({ item: message }) => (
+          <View
+            style={[
+              styles.messageBubble,
+              message.isUser ? styles.userBubble : styles.assistantBubble,
+            ]}
+          >
+            <Text style={[styles.messageText, message.isUser ? styles.userText : styles.assistantText]}>
+              {message.text}
+            </Text>
+          </View>
+        )}
+        contentContainerStyle={{ paddingBottom: 20 }}
+      />
+      <View style={styles.inputContainer}>
+        {options.length > 0 && options[0].isTextInput ? (
+          <View style={styles.inputWrapper}>
+            <TextInput
+              style={styles.textInput}
+              value={inputValue}
+              onChangeText={setInputValue}
+              placeholder="Ingresa el identificador (ej. XYZ123)"
+            />
+            <TouchableOpacity
+              style={[styles.optionButton, !inputValue ? styles.disabledButton : {}]}
+              onPress={() => handleOptionPress(inputValue)}
+              disabled={!inputValue}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.buttonText}>Continuar</Text>
+            </TouchableOpacity>
+          </View>
+        ) : options.length > 0 ? (
+          <FlatList
+            data={options}
+            keyExtractor={(item, index) => index.toString()}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.optionButton}
+                onPress={() => handleOptionPress(item.text)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.buttonText}>{item.text}</Text>
+              </TouchableOpacity>
+            )}
+          />
+        ) : (
+          <TouchableOpacity
+            style={styles.continueButton}
+            onPress={handleContinue}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.buttonText}>Continuar</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  );
+}
