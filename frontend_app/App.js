@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, FlatList, TextInput, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import styles from './styles';
 
 // Configuración WebSocket
@@ -203,7 +204,11 @@ function needsUpdate(timestamp) {
   return hoursSinceUpdate > 24;
 }
 
-export default function App() {
+
+
+function MainApp() {
+  const insets = useSafeAreaInsets();
+
   const [flows, setFlows] = useState([]);
   const [selectedFlow, setSelectedFlow] = useState(null);
   const [currentStepId, setCurrentStepId] = useState(null);
@@ -473,7 +478,7 @@ export default function App() {
   // Pantalla de carga
   if (isLoading) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { paddingTop: insets.top }]}>
         <Text style={styles.title}>Cargando flujos...</Text>
       </View>
     );
@@ -482,7 +487,7 @@ export default function App() {
   // Pantalla de selección de flujo
   if (!selectedFlow && !showReports && !selectedReport) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.connectionStatus}>
           <Text style={[styles.connectionText, isConnected ? styles.connected : styles.disconnected]}>
             {isConnected ? 'Conectado' : 'Sin conexión'}
@@ -523,7 +528,7 @@ export default function App() {
   // Pantalla intermedia: descripción del flujo y opciones
   if (selectedFlow && !currentStepId && !showReports && !selectedReport) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.connectionStatus}>
           <Text style={[styles.connectionText, isConnected ? styles.connected : styles.disconnected]}>
             {isConnected ? 'Conectado' : 'Sin conexión'}
@@ -569,7 +574,7 @@ export default function App() {
   if (showReports) {
     const title = selectedFlow ? `Informes de ${selectedFlow.title[0].text}` : 'Todos los Informes';
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { paddingTop: insets.top }]}>
         <Text style={styles.title}>{title}</Text>
         {reports.length === 0 ? (
           <Text style={styles.noReportText}>No hay informes disponibles.</Text>
@@ -609,7 +614,7 @@ export default function App() {
   // Pantalla de último informe
   if (selectedReport) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { paddingTop: insets.top }]}>
         <Text style={styles.title}>Último Informe de {selectedFlow.title[0].text}</Text>
         {selectedReport ? (
           <View style={styles.historyItem}>
@@ -643,7 +648,7 @@ export default function App() {
   // Pantalla final con historial
   if (currentStepId === "0") {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { paddingTop: insets.top }]}>
         <Text style={styles.title}>Flujo finalizado</Text>
         <Text style={styles.subtitle}>Historial de respuestas:</Text>
         <FlatList
@@ -680,7 +685,7 @@ export default function App() {
   const options = step ? parseOptions(step.question[0].text, processFlow(selectedFlow).stepNameToId, processFlow(selectedFlow).graph[currentStepId] || []) : [];
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.connectionStatus}>
         <Text style={[styles.connectionText, isConnected ? styles.connected : styles.disconnected]}>
           {isConnected ? 'Conectado' : 'Sin conexión'}
@@ -746,5 +751,15 @@ export default function App() {
         )}
       </View>
     </View>
+  );
+}
+
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
+        <MainApp />
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
