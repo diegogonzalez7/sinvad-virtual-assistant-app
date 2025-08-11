@@ -21,7 +21,8 @@
     "react-native-fs": "^2.20.0",
     "react-native-gifted-chat": "^2.8.1",
     "react-native-tailwindcss": "^1.1.11",
-    "react-native-web": "^0.20.0"
+    "react-native-web": "^0.20.0",
+    "react-native-safe-area-context": "5.4.0"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0"

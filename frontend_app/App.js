@@ -5,7 +5,7 @@ import NetInfo from '@react-native-community/netinfo';
 import styles from './styles';
 
 // Configuración WebSocket
-const WS_URL = 'ws://localhost:8080'; // Reemplazar con IP local si se usa dispositivo físico, ej. ws://192.168.1.100:8080
+const WS_URL = 'ws://192.168.1.20:8080';
 const PIN = '123456';
 
 // Función para procesar un flujo
@@ -100,7 +100,7 @@ async function saveReport(flowId, flowName, history) {
       flowName,
       history,
       timestamp: new Date().toISOString(),
-      estado: 'Pendiente',
+      estado: 'Pendiente', // Nuevo atributo
     };
     const existingReports = JSON.parse(await AsyncStorage.getItem('reports') || '[]');
     await AsyncStorage.setItem('reports', JSON.stringify([...existingReports, report]));
@@ -112,13 +112,13 @@ async function saveReport(flowId, flowName, history) {
 }
 
 // Función para marcar informe como sincronizado
-async function markReportAsSynchronized(reports, setReports, timestamp) {
+async function markReportAsSynchronized(timestamp) {
   try {
+    const reports = JSON.parse(await AsyncStorage.getItem('reports') || '[]');
     const updatedReports = reports.map(report => 
       report.timestamp === timestamp ? { ...report, estado: 'Sincronizado' } : report
     );
     await AsyncStorage.setItem('reports', JSON.stringify(updatedReports));
-    setReports(updatedReports);
   } catch (error) {
     console.log('Error marking report as synchronized:', error);
   }
@@ -173,7 +173,7 @@ async function saveFlowsToStorage(flows) {
       timestamp: new Date().toISOString(),
     };
     await AsyncStorage.setItem('flows', JSON.stringify(data));
-    console.log('Flujos guardados en AsyncStorage:', flows.length);
+    console.log('Flujos guardados en AsyncStorage.');
   } catch (error) {
     console.log('Error guardando flujos:', error);
   }
@@ -215,11 +215,9 @@ export default function App() {
   const [selectedReport, setSelectedReport] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isConnected, setIsConnected] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const ws = useRef(null);
   const reconnectAttempts = useRef(0);
   const maxReconnectAttempts = 5;
-  const tempFlows = useRef([]); // Lista temporal para acumular flujos
 
   // Manejar conexión WebSocket
   const connectWebSocket = () => {
@@ -232,56 +230,41 @@ export default function App() {
       ws.current.send(JSON.stringify({ type: 'PIN', data: PIN }));
     };
 
-    ws.current.onmessage = async (event) => {
+    ws.current.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
-        console.log('Mensaje recibido:', message); // Depuración
         switch (message.type) {
           case 'AUTH_OK':
             console.log('Autenticación exitosa');
-            setIsAuthenticated(true);
             ws.current.send(JSON.stringify({ type: 'GET_FLOWS' }));
             break;
-          case 'AUTH_ERROR':
-            console.log('Error de autenticación: PIN incorrecto');
-            alert('PIN incorrecto');
-            setIsConnected(false);
-            ws.current.close();
-            break;
           case 'FLOW':
-            console.log('Flujo recibido:', message.data.id); // Depuración
-            tempFlows.current = [
-              ...tempFlows.current.filter(f => f.id !== message.data.id),
-              message.data
-            ].sort((a, b) => a.title[0].text.localeCompare(b.title[0].text));
-            setFlows(tempFlows.current); // Actualizar flows inmediatamente
-            await saveFlowsToStorage(tempFlows.current);
-            break;
-          case 'FLOW_REMOVED':
-            console.log('Flujo eliminado:', message.data); // Depuración
-            tempFlows.current = tempFlows.current.filter(flow => flow.id !== message.data);
-            setFlows(tempFlows.current);
-            await AsyncStorage.setItem('flows', JSON.stringify({ flows: tempFlows.current, timestamp: new Date().toISOString() }));
+            setFlows(prev => {
+              const newFlows = [...prev.filter(f => f.id !== message.data.id), message.data];
+              return newFlows.sort((a, b) => a.title[0].text.localeCompare(b.title[0].text));
+            });
             break;
           case 'ALL_FLOWS_SENT':
-            console.log('Todos los flujos enviados, actualizando estado:', tempFlows.current); // Depuración
-            setFlows(tempFlows.current);
-            await saveFlowsToStorage(tempFlows.current);
+            saveFlowsToStorage(flows);
             setIsLoading(false);
             break;
           case 'REPORT_SAVED':
             console.log(`Informe guardado en backend: ${message.data}`);
-            await markReportAsSynchronized(reports, setReports, message.data);
+            markReportAsSynchronized(message.data); // Marcar como Sincronizado
             break;
           case 'PARTIAL_FLOW_SAVED':
             console.log(`Flujo parcial guardado: ${message.data}`);
             break;
+          case 'AUTH_ERROR':
+            console.log('Error de autenticación: PIN incorrecto');
+            setIsConnected(false);
+            ws.current.close();
+            break;
           case 'ERROR':
             console.log(`Error del servidor: ${message.data}`);
-            alert(`Error: ${message.data}`);
             break;
           default:
-            console.log('Mensaje desconocido:', message);
+            console.log(`Mensaje desconocido: ${message.type}`);
         }
       } catch (err) {
         console.log('Error parsing WebSocket message:', err);
@@ -291,11 +274,9 @@ export default function App() {
     ws.current.onclose = () => {
       console.log('WebSocket desconectado');
       setIsConnected(false);
-      setIsAuthenticated(false);
       if (reconnectAttempts.current < maxReconnectAttempts) {
         reconnectAttempts.current += 1;
-        console.log(`Intento de reconexión ${reconnectAttempts.current}/${maxReconnectAttempts}`);
-        setTimeout(connectWebSocket, 5000 * reconnectAttempts.current);
+        setTimeout(connectWebSocket, 3000 * reconnectAttempts.current);
       }
     };
 
@@ -313,7 +294,6 @@ export default function App() {
       const storedFlows = await loadFlowsFromStorage();
       if (storedFlows) {
         setFlows(storedFlows);
-        tempFlows.current = storedFlows;
         setIsLoading(false);
       }
 
@@ -352,7 +332,7 @@ export default function App() {
   // Sincronizar informes al reconectar
   useEffect(() => {
     const syncData = async () => {
-      if (isConnected && ws.current && ws.current.readyState === WebSocket.OPEN && isAuthenticated) {
+      if (isConnected && ws.current && ws.current.readyState === WebSocket.OPEN) {
         // Sincronizar informes pendientes
         const reports = JSON.parse(await AsyncStorage.getItem('reports') || '[]');
         const pendingReports = reports.filter(report => report.estado === 'Pendiente');
@@ -362,7 +342,7 @@ export default function App() {
       }
     };
     syncData();
-  }, [isConnected, isAuthenticated]);
+  }, [isConnected]);
 
   // Seleccionar un flujo
   const handleSelectFlow = (flow) => {
@@ -508,40 +488,34 @@ export default function App() {
             {isConnected ? 'Conectado' : 'Sin conexión'}
           </Text>
         </View>
-        {flows.length === 0 ? (
-          <Text style={styles.noReportText}>No hay flujos disponibles. Verifica la conexión con el servidor.</Text>
-        ) : (
-          <>
-            <Text style={styles.title}>Selecciona un flujo</Text>
-            <FlatList
-              data={flows}
-              keyExtractor={(item) => item.id}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.flowButton}
-                  onPress={() => handleSelectFlow(item)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.buttonText}>{item.title[0].text}</Text>
-                </TouchableOpacity>
-              )}
-            />
+        <Text style={styles.title}>Selecciona un flujo</Text>
+        <FlatList
+          data={flows}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
             <TouchableOpacity
-              style={styles.allReportsButton}
-              onPress={() => handleShowReports()}
+              style={styles.flowButton}
+              onPress={() => handleSelectFlow(item)}
               activeOpacity={0.7}
             >
-              <Text style={styles.buttonText}>Ver Todos los Informes</Text>
+              <Text style={styles.buttonText}>{item.title[0].text}</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.clearReportsButton}
-              onPress={() => clearReports(setReports)}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.buttonText}>Limpiar Informes</Text>
-            </TouchableOpacity>
-          </>
-        )}
+          )}
+        />
+        <TouchableOpacity
+          style={styles.allReportsButton}
+          onPress={() => handleShowReports()}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.buttonText}>Ver Todos los Informes</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.clearReportsButton}
+          onPress={() => clearReports(setReports)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.buttonText}>Limpiar Informes</Text>
+        </TouchableOpacity>
       </View>
     );
   }

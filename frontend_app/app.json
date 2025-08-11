@@ -24,7 +24,8 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.diegogonza7.frontendapp"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -33,6 +34,7 @@
       "eas": {
         "projectId": "193bbba5-c3fd-4f95-b3b2-9ada13c626cd"
       }
-    }
+    },
+    "hostUri": "192.168.1.20:8081"
   }
 }

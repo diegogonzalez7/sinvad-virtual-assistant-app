@@ -85,6 +85,21 @@ async function fetchFlows() {
       return [];
     }
 
+    for (const flow of flows) {
+      await db.run(
+        'INSERT OR REPLACE INTO flows (id, title, description, stepID, steps, nextSteps) VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          flow.id,
+          JSON.stringify(flow.title),
+          JSON.stringify(flow.description || []),
+          flow.stepID,
+          JSON.stringify(flow.steps),
+          JSON.stringify(flow.nextSteps)
+        ]
+      );
+      console.log(`Flujo ${flow.id} guardado correctamente`);
+    }
+    console.log('Flujos cargados desde SINVAD');
     return flows;
   } catch (err) {
     console.error('Error obteniendo flujos:', err.message);
@@ -93,76 +108,13 @@ async function fetchFlows() {
   }
 }
 
-// Actualizar flujos en la base de datos y notificar a los clientes
-async function updateFlows() {
-  const flows = await fetchFlows();
-  if (flows.length === 0) {
-    console.log('No hay flujos disponibles para actualizar');
-    return;
-  }
-
-  // Obtener IDs de flujos actuales en la base de datos
-  const existingFlows = await new Promise((resolve) => {
-    db.all('SELECT id FROM flows', [], (err, rows) => {
-      if (err) {
-        console.error('Error obteniendo flujos de la base de datos:', err);
-        resolve([]);
-        return;
-      }
-      resolve(rows.map(row => row.id));
-    });
-  });
-
-  const newFlowIds = flows.map(flow => flow.id);
-  const flowsToAdd = flows.filter(flow => !existingFlows.includes(flow.id));
-  const flowsToRemove = existingFlows.filter(id => !newFlowIds.includes(id));
-
-  // Agregar nuevos flujos
-  for (const flow of flowsToAdd) {
-    await db.run(
-      'INSERT OR REPLACE INTO flows (id, title, description, stepID, steps, nextSteps) VALUES (?, ?, ?, ?, ?, ?)',
-      [
-        flow.id,
-        JSON.stringify(flow.title),
-        JSON.stringify(flow.description || []),
-        flow.stepID,
-        JSON.stringify(flow.steps),
-        JSON.stringify(flow.nextSteps)
-      ]
-    );
-    console.log(`Flujo nuevo ${flow.id} guardado correctamente`);
-    // Notificar a los clientes
-    wss.clients.forEach(client => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify({ type: 'FLOW', data: flow }));
-      }
-    });
-  }
-
-  // Eliminar flujos que ya no están en SINVAD
-  for (const flowId of flowsToRemove) {
-    await db.run('DELETE FROM flows WHERE id = ?', [flowId]);
-    console.log(`Flujo ${flowId} eliminado de la base de datos`);
-    // Notificar a los clientes
-    wss.clients.forEach(client => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify({ type: 'FLOW_REMOVED', data: flowId }));
-      }
-    });
-  }
-
-  if (flowsToAdd.length > 0 || flowsToRemove.length > 0) {
-    console.log(`Actualización completada: ${flowsToAdd.length} flujos añadidos, ${flowsToRemove.length} flujos eliminados`);
-  }
-}
-
 // Cargar flujos al iniciar el servidor
 (async () => {
-  await updateFlows();
+  const flows = await fetchFlows();
+  if (flows.length === 0) {
+    console.log('No hay flujos disponibles para enviar al frontend');
+  }
 })();
-
-// Actualizar flujos cada 5 minutos
-setInterval(updateFlows, 5 * 60 * 1000);
 
 // Iniciar servidor WebSocket
 const wss = new WebSocket.Server({ port: WS_PORT });
@@ -174,7 +126,6 @@ wss.on('connection', (ws) => {
   ws.on('message', async (message) => {
     try {
       const parsedMessage = JSON.parse(message);
-      console.log('Mensaje recibido del cliente:', JSON.stringify(parsedMessage, null, 2)); // Depuración con formato legible
       switch (parsedMessage.type) {
         case 'PIN':
           const pin = parsedMessage.data;
@@ -211,7 +162,6 @@ wss.on('connection', (ws) => {
                 steps: JSON.parse(row.steps),
                 nextSteps: JSON.parse(row.nextSteps)
               }));
-              console.log('Flujos obtenidos de la base de datos:', flows.map(f => f.id)); // Depuración
               resolve(flows);
             });
           });
@@ -223,24 +173,11 @@ wss.on('connection', (ws) => {
               ws.send(JSON.stringify({ type: 'ERROR', data: 'No se pudieron cargar flujos desde SINVAD' }));
             } else {
               for (const flow of fetchedFlows) {
-                await db.run(
-                  'INSERT OR REPLACE INTO flows (id, title, description, stepID, steps, nextSteps) VALUES (?, ?, ?, ?, ?, ?)',
-                  [
-                    flow.id,
-                    JSON.stringify(flow.title),
-                    JSON.stringify(flow.description || []),
-                    flow.stepID,
-                    JSON.stringify(flow.steps),
-                    JSON.stringify(flow.nextSteps)
-                  ]
-                );
-                console.log(`Flujo ${flow.id} enviado al cliente`); // Depuración
                 ws.send(JSON.stringify({ type: 'FLOW', data: flow }));
               }
             }
           } else {
             for (const flow of flows) {
-              console.log(`Flujo ${flow.id} enviado al cliente`); // Depuración
               ws.send(JSON.stringify({ type: 'FLOW', data: flow }));
             }
           }
@@ -279,7 +216,7 @@ wss.on('connection', (ws) => {
           break;
 
         default:
-          console.log('Mensaje desconocido:', JSON.stringify(parsedMessage, null, 2));
+          console.log('Mensaje desconocido:', parsedMessage);
           ws.send(JSON.stringify({ type: 'ERROR', data: 'Mensaje desconocido' }));
       }
     } catch (err) {
