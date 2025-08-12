@@ -10,7 +10,7 @@ const USER_PWD = process.env.USER_PWD || '-1432702675';
 const PROFILE_ID = process.env.PROFILE_ID || '1617036284204867';
 
 // Conectar a SQLite
-const db = new sqlite3.Database('./app.db', (err) => {
+const db = new sqlite3.Database('./app.db', err => {
   if (err) {
     console.error('Error conectando a SQLite:', err);
     return;
@@ -57,7 +57,7 @@ db.serialize(() => {
   console.log('Tablas creadas exitosamente');
 
   // Crear usuario de prueba
-  db.run('INSERT OR IGNORE INTO users (username, pin) VALUES (?, ?)', ['admin', '123456'], (err) => {
+  db.run('INSERT OR IGNORE INTO users (username, pin) VALUES (?, ?)', ['admin', '123456'], err => {
     if (err) {
       console.error('Error creando usuario de prueba:', err);
     } else {
@@ -72,34 +72,17 @@ async function fetchFlows() {
   try {
     const flowsResponse = await axios.get(`${SINVAD_API_URL}/command/command?steps=true`, {
       headers: {
-        'apiKey': SINVAD_API_KEY,
-        'userPwd': USER_PWD,
-        'profileId': PROFILE_ID
-      }
+        apiKey: SINVAD_API_KEY,
+        userPwd: USER_PWD,
+        profileId: PROFILE_ID,
+      },
     });
 
-    // Manejar la respuesta: usar flowsResponse.data directamente si es un array, o flowsResponse.data.flows
     const flows = Array.isArray(flowsResponse.data) ? flowsResponse.data : flowsResponse.data.flows;
     if (!Array.isArray(flows)) {
       console.error('Error: La respuesta de SINVAD no contiene un array de flujos:', flowsResponse.data);
       return [];
     }
-
-    for (const flow of flows) {
-      await db.run(
-        'INSERT OR REPLACE INTO flows (id, title, description, stepID, steps, nextSteps) VALUES (?, ?, ?, ?, ?, ?)',
-        [
-          flow.id,
-          JSON.stringify(flow.title),
-          JSON.stringify(flow.description || []),
-          flow.stepID,
-          JSON.stringify(flow.steps),
-          JSON.stringify(flow.nextSteps)
-        ]
-      );
-      console.log(`Flujo ${flow.id} guardado correctamente`);
-    }
-    console.log('Flujos cargados desde SINVAD');
     return flows;
   } catch (err) {
     console.error('Error obteniendo flujos:', err.message);
@@ -108,22 +91,86 @@ async function fetchFlows() {
   }
 }
 
+// Función para actualizar flujos comparando con los existentes
+async function updateFlows() {
+  console.log('Actualizando flujos...');
+  const newFlows = await fetchFlows();
+  if (newFlows.length === 0) {
+    console.log('No se obtuvieron nuevos flujos de SINVAD');
+    return;
+  }
+
+  // Obtener flujos actuales de la base de datos
+  const currentFlows = await new Promise(resolve => {
+    db.all('SELECT id FROM flows', [], (err, rows) => {
+      if (err) {
+        console.error('Error obteniendo flujos de la base de datos:', err);
+        resolve([]);
+      } else {
+        resolve(rows.map(row => row.id));
+      }
+    });
+  });
+
+  // Identificar flujos nuevos y eliminados
+  const newFlowIds = newFlows.map(flow => flow.id);
+  const flowsToAdd = newFlows.filter(flow => !currentFlows.includes(flow.id));
+  const flowsToDelete = currentFlows.filter(id => !newFlowIds.includes(id));
+
+  // Añadir nuevos flujos
+  for (const flow of flowsToAdd) {
+    await db.run('INSERT INTO flows (id, title, description, stepID, steps, nextSteps) VALUES (?, ?, ?, ?, ?, ?)', [
+      flow.id,
+      JSON.stringify(flow.title),
+      JSON.stringify(flow.description || []),
+      flow.stepID,
+      JSON.stringify(flow.steps),
+      JSON.stringify(flow.nextSteps),
+    ]);
+    console.log(`Flujo nuevo ${flow.id} añadido`);
+  }
+
+  // Eliminar flujos que ya no existen
+  for (const id of flowsToDelete) {
+    await db.run('DELETE FROM flows WHERE id = ?', [id]);
+    console.log(`Flujo ${id} eliminado`);
+  }
+
+  // Resumen de la actualización (solo añadidos y eliminados)
+  console.log(`Actualización completa: se han eliminado ${flowsToDelete.length} flujos, añadido ${flowsToAdd.length} flujos`);
+
+  // Notificar a los clientes WebSocket si hay cambios
+  if (flowsToAdd.length > 0 || flowsToDelete.length > 0) {
+    wss.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({ type: 'UPDATE_FLOWS' }));
+        for (const flow of flowsToAdd) {
+          client.send(JSON.stringify({ type: 'FLOW', data: flow }));
+        }
+        for (const id of flowsToDelete) {
+          client.send(JSON.stringify({ type: 'FLOW_REMOVED', data: id }));
+        }
+        client.send(JSON.stringify({ type: 'ALL_FLOWS_SENT' }));
+        console.log('Flujos actualizados enviados a clientes');
+      }
+    });
+  }
+}
+
 // Cargar flujos al iniciar el servidor
 (async () => {
-  const flows = await fetchFlows();
-  if (flows.length === 0) {
-    console.log('No hay flujos disponibles para enviar al frontend');
-  }
+  await updateFlows(); // Carga inicial
+  setInterval(updateFlows, 5 * 60 * 1000); // Actualización cada 5 minutos (300,000 ms)
 })();
 
 // Iniciar servidor WebSocket
 const wss = new WebSocket.Server({ port: WS_PORT });
-console.log(`Servidor WebSocket iniciado en ws://localhost:${WS_PORT}`);
+console.log(`Servidor WebSocket iniciado en ws://0.0.0.0:${WS_PORT}`);
 
-wss.on('connection', (ws) => {
+wss.on('connection', ws => {
   console.log('Cliente WebSocket conectado');
 
-  ws.on('message', async (message) => {
+  ws.on('message', async message => {
     try {
       const parsedMessage = JSON.parse(message);
       switch (parsedMessage.type) {
@@ -146,7 +193,7 @@ wss.on('connection', (ws) => {
           break;
 
         case 'GET_FLOWS':
-          const flows = await new Promise((resolve) => {
+          const flows = await new Promise(resolve => {
             db.all('SELECT * FROM flows', [], (err, rows) => {
               if (err) {
                 console.error('Error obteniendo flujos de la base de datos:', err);
@@ -160,7 +207,7 @@ wss.on('connection', (ws) => {
                 description: JSON.parse(row.description),
                 stepID: row.stepID,
                 steps: JSON.parse(row.steps),
-                nextSteps: JSON.parse(row.nextSteps)
+                nextSteps: JSON.parse(row.nextSteps),
               }));
               resolve(flows);
             });
@@ -188,10 +235,12 @@ wss.on('connection', (ws) => {
         case 'REPORT':
           try {
             const report = parsedMessage.data;
-            await db.run(
-              'INSERT INTO reports (flowId, flowName, history, timestamp) VALUES (?, ?, ?, ?)',
-              [report.flowId, report.flowName, JSON.stringify(report.history), report.timestamp]
-            );
+            await db.run('INSERT INTO reports (flowId, flowName, history, timestamp) VALUES (?, ?, ?, ?)', [
+              report.flowId,
+              report.flowName,
+              JSON.stringify(report.history),
+              report.timestamp,
+            ]);
             console.log(`Informe guardado: ${JSON.stringify(report)}`);
             ws.send(JSON.stringify({ type: 'REPORT_SAVED', data: report.timestamp }));
           } catch (err) {
@@ -203,10 +252,12 @@ wss.on('connection', (ws) => {
         case 'PARTIALFLOW':
           try {
             const partialFlow = parsedMessage.data;
-            await db.run(
-              'INSERT INTO partial_flows (flowId, stepId, responses, timestamp) VALUES (?, ?, ?, ?)',
-              [partialFlow.flowId, partialFlow.stepId, JSON.stringify(partialFlow.responses), new Date().toISOString()]
-            );
+            await db.run('INSERT INTO partial_flows (flowId, stepId, responses, timestamp) VALUES (?, ?, ?, ?)', [
+              partialFlow.flowId,
+              partialFlow.stepId,
+              JSON.stringify(partialFlow.responses),
+              new Date().toISOString(),
+            ]);
             console.log(`Flujo parcial guardado: ${JSON.stringify(partialFlow)}`);
             ws.send(JSON.stringify({ type: 'PARTIAL_FLOW_SAVED', data: partialFlow.flowId }));
           } catch (err) {
@@ -233,7 +284,7 @@ wss.on('connection', (ws) => {
 // Manejar cierre del servidor
 process.on('SIGINT', () => {
   console.log('Cerrando servidor WebSocket y base de datos...');
-  db.close((err) => {
+  db.close(err => {
     if (err) {
       console.error('Error cerrando base de datos:', err);
     } else {
