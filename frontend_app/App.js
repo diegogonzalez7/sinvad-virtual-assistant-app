@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, FlatList, TextInput, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, FlatList, TextInput, Alert, ActivityIndicator } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
+import Feather from '@expo/vector-icons/Feather';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import styles from './styles';
 
 // Configuración WebSocket
-const WS_URL = 'ws://localhost:8080'; //Cambiar la IP por localhost si hacemos pruebas en el ordenador
+const WS_URL = 'ws://192.168.1.20:8080'; //Cambiar la IP por localhost si hacemos pruebas en el ordenador
 const PIN = '123456';
 
 // Función para procesar un flujo y calcular duración estimada
@@ -546,8 +547,9 @@ function MainApp() {
   // Pantalla de carga
   if (isLoading) {
     return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        <Text style={styles.title}>Cargando flujos...</Text>
+      <View style={[styles.container, { paddingTop: insets.top }, styles.loadingContainer]}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={styles.loadingText}>Cargando flujos...</Text>
       </View>
     );
   }
@@ -557,11 +559,14 @@ function MainApp() {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.connectionStatus}>
+          <Feather name={isConnected ? 'wifi' : 'wifi-off'} size={24} color={isConnected ? 'green' : 'red'} style={{ marginRight: 8 }} />
           <Text style={[styles.connectionText, isConnected ? styles.connected : styles.disconnected]}>
             {isConnected ? 'Conectado' : 'Sin conexión'}
           </Text>
         </View>
+
         <Text style={styles.title}>Selecciona un flujo</Text>
+
         <FlatList
           data={flows}
           keyExtractor={item => item.id}
@@ -571,9 +576,11 @@ function MainApp() {
             </TouchableOpacity>
           )}
         />
+
         <TouchableOpacity style={styles.allReportsButton} onPress={() => handleShowReports()} activeOpacity={0.7}>
           <Text style={styles.buttonText}>Ver Todos los Informes</Text>
         </TouchableOpacity>
+
         <TouchableOpacity style={styles.clearReportsButton} onPress={() => clearReportsWithAlert(setReports)} activeOpacity={0.7}>
           <Text style={styles.buttonText}>Limpiar Informes</Text>
         </TouchableOpacity>
@@ -587,6 +594,7 @@ function MainApp() {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.connectionStatus}>
+          <Feather name={isConnected ? 'wifi' : 'wifi-off'} size={24} color={isConnected ? 'green' : 'red'} style={{ marginRight: 8 }} />
           <Text style={[styles.connectionText, isConnected ? styles.connected : styles.disconnected]}>
             {isConnected ? 'Conectado' : 'Sin conexión'}
           </Text>
@@ -728,6 +736,7 @@ function MainApp() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.connectionStatus}>
+        <Feather name={isConnected ? 'wifi' : 'wifi-off'} size={24} color={isConnected ? 'green' : 'red'} style={{ marginRight: 8 }} />
         <Text style={[styles.connectionText, isConnected ? styles.connected : styles.disconnected]}>
           {isConnected ? 'Conectado' : 'Sin conexión'}
         </Text>

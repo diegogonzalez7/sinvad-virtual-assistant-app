@@ -7,7 +7,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
   },
   title: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: 'bold',
     color: '#333',
     marginBottom: 20,
@@ -119,7 +119,7 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
   },
   messageBubble: {
@@ -216,18 +216,33 @@ const styles = StyleSheet.create({
     marginVertical: 20,
   },
   connectionStatus: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 10,
   },
   connectionText: {
     fontSize: 14,
     fontWeight: 'bold',
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f0f4f8',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#333',
+    textAlign: 'center',
+  },
   connected: {
-    color: '#34C759',
+    color: '#4CAF50', // texto verde
   },
   disconnected: {
-    color: '#FF3B30',
+    color: '#F44336', // texto rojo
   },
 });
 
