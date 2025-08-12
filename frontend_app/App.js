@@ -99,7 +99,7 @@ async function saveReport(flowId, flowName, history) {
       flowName,
       history,
       timestamp: new Date().toISOString(),
-      estado: 'Pendiente',
+      estado: 'Pendiente', // Nuevo atributo
     };
     const existingReports = JSON.parse((await AsyncStorage.getItem('reports')) || '[]');
     await AsyncStorage.setItem('reports', JSON.stringify([...existingReports, report]));
@@ -150,11 +150,24 @@ async function getLatestReport(flowId, setSelectedReport) {
   }
 }
 
-// Función para limpiar todos los informes
-async function clearReports(setReports) {
+// Función para limpiar todos los informes (sin alerta)
+async function clearReportsSilently(setReports) {
   try {
     await AsyncStorage.removeItem('reports');
     setReports([]);
+    await AsyncStorage.setItem('lastCleanup', new Date().toISOString()); // Actualizar la última limpieza
+    console.log('Informes borrados silenciosamente y última limpieza registrada.');
+  } catch (error) {
+    console.log('Error limpiando informes:', error);
+  }
+}
+
+// Función para limpiar todos los informes (con alerta)
+async function clearReportsWithAlert(setReports) {
+  try {
+    await AsyncStorage.removeItem('reports');
+    setReports([]);
+    await AsyncStorage.setItem('lastCleanup', new Date().toISOString()); // Actualizar la última limpieza
     Alert.alert('Éxito', 'Todos los informes han sido eliminados.');
   } catch (error) {
     console.log('Error limpiando informes:', error);
@@ -248,7 +261,6 @@ function MainApp() {
             break;
           case 'UPDATE_FLOWS':
             console.log('Actualización de flujos detectada, procesando cambios en tiempo real...');
-            // No se solicita GET_FLOWS aquí, ya que los cambios se manejan con FLOW y FLOW_REMOVED
             break;
           case 'REPORT_SAVED':
             console.log(`Informe guardado en backend: ${message.data}`);
@@ -287,7 +299,7 @@ function MainApp() {
     };
   };
 
-  // Inicializar aplicación
+  // Inicializar aplicación y manejar borrado periódico
   useEffect(() => {
     const initializeApp = async () => {
       setIsLoading(true);
@@ -318,17 +330,36 @@ function MainApp() {
         }
       });
 
-      return () => unsubscribe();
+      // Borrado periódico de informes
+      const checkAndClearReports = async () => {
+        const lastCleanup = await AsyncStorage.getItem('lastCleanup');
+        const now = new Date();
+        const oneWeekInMs = 7 * 24 * 60 * 60 * 1000; // 1 semana en milisegundos
+
+        if (!lastCleanup) {
+          await AsyncStorage.setItem('lastCleanup', now.toISOString()); // Primera vez
+        } else {
+          const lastCleanupDate = new Date(lastCleanup);
+          if (now - lastCleanupDate >= oneWeekInMs) {
+            await clearReportsSilently(setReports); // Borrado sin alerta
+          }
+        }
+      };
+
+      checkAndClearReports(); // Verificar al iniciar
+      const intervalId = setInterval(checkAndClearReports, 24 * 60 * 60 * 1000); // Cada 24 horas revisa si se ha llegado a una semana
+
+      return () => {
+        unsubscribe();
+        clearInterval(intervalId); // Limpiar intervalo al desmontar
+        if (ws.current) {
+          ws.current.close();
+          ws.current = null;
+        }
+      };
     };
 
     initializeApp();
-
-    return () => {
-      if (ws.current) {
-        ws.current.close();
-        ws.current = null;
-      }
-    };
   }, []);
 
   // Sincronizar informes al reconectar
@@ -512,7 +543,7 @@ function MainApp() {
         <TouchableOpacity style={styles.allReportsButton} onPress={() => handleShowReports()} activeOpacity={0.7}>
           <Text style={styles.buttonText}>Ver Todos los Informes</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.clearReportsButton} onPress={() => clearReports(setReports)} activeOpacity={0.7}>
+        <TouchableOpacity style={styles.clearReportsButton} onPress={() => clearReportsWithAlert(setReports)} activeOpacity={0.7}>
           <Text style={styles.buttonText}>Limpiar Informes</Text>
         </TouchableOpacity>
       </View>
