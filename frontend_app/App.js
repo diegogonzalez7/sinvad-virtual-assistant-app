@@ -175,10 +175,21 @@ async function clearReportsSilently(setReports) {
 // Función para limpiar todos los informes (con alerta)
 async function clearReportsWithAlert(setReports) {
   try {
-    await AsyncStorage.removeItem('reports');
-    setReports([]);
-    await AsyncStorage.setItem('lastCleanup', new Date().toISOString()); // Actualizar la última limpieza
-    Alert.alert('Éxito', 'Todos los informes han sido eliminados.');
+    const reports = JSON.parse((await AsyncStorage.getItem('reports')) || '[]');
+    const synchronizedReports = reports.filter(report => report.estado === 'Sincronizado');
+    if (synchronizedReports.length < reports.length) {
+      const updatedReports = reports.filter(report => report.estado !== 'Sincronizado');
+      await AsyncStorage.setItem('reports', JSON.stringify(updatedReports));
+      setReports(updatedReports);
+      await AsyncStorage.setItem('lastCleanup', new Date().toISOString()); // Actualizar la última limpieza
+      console.log('Informes sincronizados borrados silenciosamente y última limpieza registrada.');
+      Alert.alert('Éxito', 'Todos los informes han sido eliminados.');
+    } else {
+      await AsyncStorage.removeItem('reports');
+      setReports([]);
+      await AsyncStorage.setItem('lastCleanup', new Date().toISOString()); // Actualizar la última limpieza
+      console.log('Todos los informes (solo sincronizados) borrados silenciosamente y última limpieza registrada.');
+    }
   } catch (error) {
     console.log('Error limpiando informes:', error);
     Alert.alert('Error', 'No se pudieron limpiar los informes.');
