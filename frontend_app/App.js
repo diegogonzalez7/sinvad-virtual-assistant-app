@@ -150,13 +150,23 @@ async function getLatestReport(flowId, setSelectedReport) {
   }
 }
 
-// Función para limpiar todos los informes (sin alerta)
+// Función para limpiar todos los informes (sin alerta, solo sincronizados)
 async function clearReportsSilently(setReports) {
   try {
-    await AsyncStorage.removeItem('reports');
-    setReports([]);
-    await AsyncStorage.setItem('lastCleanup', new Date().toISOString()); // Actualizar la última limpieza
-    console.log('Informes borrados silenciosamente y última limpieza registrada.');
+    const reports = JSON.parse((await AsyncStorage.getItem('reports')) || '[]');
+    const synchronizedReports = reports.filter(report => report.estado === 'Sincronizado');
+    if (synchronizedReports.length < reports.length) {
+      const updatedReports = reports.filter(report => report.estado !== 'Sincronizado');
+      await AsyncStorage.setItem('reports', JSON.stringify(updatedReports));
+      setReports(updatedReports);
+      await AsyncStorage.setItem('lastCleanup', new Date().toISOString()); // Actualizar la última limpieza
+      console.log('Informes sincronizados borrados silenciosamente y última limpieza registrada.');
+    } else {
+      await AsyncStorage.removeItem('reports');
+      setReports([]);
+      await AsyncStorage.setItem('lastCleanup', new Date().toISOString()); // Actualizar la última limpieza
+      console.log('Todos los informes (solo sincronizados) borrados silenciosamente y última limpieza registrada.');
+    }
   } catch (error) {
     console.log('Error limpiando informes:', error);
   }
@@ -341,7 +351,7 @@ function MainApp() {
         } else {
           const lastCleanupDate = new Date(lastCleanup);
           if (now - lastCleanupDate >= oneWeekInMs) {
-            await clearReportsSilently(setReports); // Borrado sin alerta
+            await clearReportsSilently(setReports); // Borrado sin alerta, solo sincronizados
           }
         }
       };
