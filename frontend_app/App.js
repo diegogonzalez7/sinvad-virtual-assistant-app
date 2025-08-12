@@ -6,10 +6,10 @@ import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-
 import styles from './styles';
 
 // Configuración WebSocket
-const WS_URL = 'ws://192.168.1.20:8080'; //Cambiar la IP por localhost si hacemos pruebas en el ordenador
+const WS_URL = 'ws://localhost:8080'; //Cambiar la IP por localhost si hacemos pruebas en el ordenador
 const PIN = '123456';
 
-// Función para procesar un flujo
+// Función para procesar un flujo y calcular duración estimada
 function processFlow(flow) {
   const stepNameToId = {};
   flow.steps.forEach(step => {
@@ -24,7 +24,11 @@ function processFlow(flow) {
     graph[prevStep].push({ nextStep, conditions });
   });
 
-  return { stepNameToId, graph };
+  // Duración estimada: 1 minuto por nodo
+  const nodeCount = flow.steps.length;
+  const duracionEstimada = nodeCount * 1; // En minutos
+
+  return { stepNameToId, graph, duracionEstimada };
 }
 
 // Función para parsear opciones dentro de los chips
@@ -99,7 +103,8 @@ async function saveReport(flowId, flowName, history) {
       flowName,
       history,
       timestamp: new Date().toISOString(),
-      estado: 'Pendiente', // Nuevo atributo
+      estado: 'Pendiente',
+      user: 'admin', // Variable para usuario, predeterminada a "admin" por ahora
     };
     const existingReports = JSON.parse((await AsyncStorage.getItem('reports')) || '[]');
     await AsyncStorage.setItem('reports', JSON.stringify([...existingReports, report]));
@@ -125,14 +130,29 @@ async function markReportAsSynchronized(timestamp) {
 async function getReports(setReports, flowId = null) {
   try {
     const reports = JSON.parse((await AsyncStorage.getItem('reports')) || '[]');
+    const lastCleanup = await AsyncStorage.getItem('lastCleanup');
+    const now = new Date();
+    const oneWeekInMs = 7 * 24 * 60 * 60 * 1000;
+
+    const updatedReports = reports.map(report => {
+      if (report.estado === 'Sincronizado' && lastCleanup) {
+        const lastCleanupDate = new Date(lastCleanup);
+        const timeRemainingMs = oneWeekInMs - (now - lastCleanupDate);
+        const timeRemaining = timeRemainingMs > 0 ? Math.ceil(timeRemainingMs / (1000 * 60 * 60 * 24)) : 0; // Días restantes
+        return { ...report, timeRemaining };
+      }
+      return report;
+    });
+
     if (flowId) {
-      const filteredReports = reports.filter(report => report.flowId === flowId);
+      const filteredReports = updatedReports.filter(report => report.flowId === flowId);
       setReports(filteredReports);
     } else {
-      setReports(reports);
+      setReports(updatedReports);
     }
   } catch (error) {
     console.log('Error fetching reports:', error);
+    setReports([]); // Establecer un array vacío para evitar pantallas en blanco
     Alert.alert('Error', 'No se pudieron cargar los informes.');
   }
 }
@@ -183,12 +203,13 @@ async function clearReportsWithAlert(setReports) {
       setReports(updatedReports);
       await AsyncStorage.setItem('lastCleanup', new Date().toISOString()); // Actualizar la última limpieza
       console.log('Informes sincronizados borrados silenciosamente y última limpieza registrada.');
-      Alert.alert('Éxito', 'Todos los informes han sido eliminados.');
+      Alert.alert('Éxito', 'Todos los informes sincronizados han sido eliminados.');
     } else {
       await AsyncStorage.removeItem('reports');
       setReports([]);
       await AsyncStorage.setItem('lastCleanup', new Date().toISOString()); // Actualizar la última limpieza
       console.log('Todos los informes (solo sincronizados) borrados silenciosamente y última limpieza registrada.');
+      Alert.alert('Éxito', 'Todos los informes sincronizados han sido eliminados.');
     }
   } catch (error) {
     console.log('Error limpiando informes:', error);
@@ -264,7 +285,6 @@ function MainApp() {
             break;
           case 'FLOW':
             setFlows(prevFlows => {
-              // Actualizar o añadir el flujo recibido
               const updatedFlows = [...prevFlows.filter(f => f.id !== message.data.id), message.data];
               return updatedFlows.sort((a, b) => a.title[0].text.localeCompare(b.title[0].text));
             });
@@ -272,7 +292,7 @@ function MainApp() {
           case 'FLOW_REMOVED':
             setFlows(prevFlows => {
               const updatedFlows = prevFlows.filter(f => f.id !== message.data);
-              saveFlowsToStorage(updatedFlows); // Actualizar AsyncStorage inmediatamente
+              saveFlowsToStorage(updatedFlows);
               return updatedFlows.sort((a, b) => a.title[0].text.localeCompare(b.title[0].text));
             });
             break;
@@ -285,7 +305,7 @@ function MainApp() {
             break;
           case 'REPORT_SAVED':
             console.log(`Informe guardado en backend: ${message.data}`);
-            markReportAsSynchronized(message.data); // Marcar como Sincronizado
+            markReportAsSynchronized(message.data);
             break;
           case 'PARTIAL_FLOW_SAVED':
             console.log(`Flujo parcial guardado: ${message.data}`);
@@ -325,25 +345,21 @@ function MainApp() {
     const initializeApp = async () => {
       setIsLoading(true);
 
-      // Cargar flujos desde AsyncStorage
       const storedFlows = await loadFlowsFromStorage();
       if (storedFlows) {
         setFlows(storedFlows);
         setIsLoading(false);
       }
 
-      // Verificar conexión
       const netInfo = await NetInfo.fetch();
       setIsConnected(netInfo.isConnected);
 
-      // Conectar WebSocket si hay conexión
       if (netInfo.isConnected) {
         connectWebSocket();
       } else if (!storedFlows) {
         setIsLoading(false);
       }
 
-      // Escuchar cambios de conexión
       const unsubscribe = NetInfo.addEventListener(state => {
         setIsConnected(state.isConnected);
         if (state.isConnected && (!ws.current || ws.current.readyState === WebSocket.CLOSED)) {
@@ -351,28 +367,27 @@ function MainApp() {
         }
       });
 
-      // Borrado periódico de informes
       const checkAndClearReports = async () => {
         const lastCleanup = await AsyncStorage.getItem('lastCleanup');
         const now = new Date();
-        const oneWeekInMs = 7 * 24 * 60 * 60 * 1000; // 1 semana en milisegundos
+        const oneWeekInMs = 7 * 24 * 60 * 60 * 1000;
 
         if (!lastCleanup) {
-          await AsyncStorage.setItem('lastCleanup', now.toISOString()); // Primera vez
+          await AsyncStorage.setItem('lastCleanup', now.toISOString());
         } else {
           const lastCleanupDate = new Date(lastCleanup);
           if (now - lastCleanupDate >= oneWeekInMs) {
-            await clearReportsSilently(setReports); // Borrado sin alerta, solo sincronizados
+            await clearReportsSilently(setReports);
           }
         }
       };
 
-      checkAndClearReports(); // Verificar al iniciar
-      const intervalId = setInterval(checkAndClearReports, 24 * 60 * 60 * 1000); // Cada 24 horas revisa si se ha llegado a una semana
+      checkAndClearReports();
+      const intervalId = setInterval(checkAndClearReports, 24 * 60 * 60 * 1000);
 
       return () => {
         unsubscribe();
-        clearInterval(intervalId); // Limpiar intervalo al desmontar
+        clearInterval(intervalId);
         if (ws.current) {
           ws.current.close();
           ws.current = null;
@@ -387,7 +402,6 @@ function MainApp() {
   useEffect(() => {
     const syncData = async () => {
       if (isConnected && ws.current && ws.current.readyState === WebSocket.OPEN) {
-        // Sincronizar informes pendientes
         const reports = JSON.parse((await AsyncStorage.getItem('reports')) || '[]');
         const pendingReports = reports.filter(report => report.estado === 'Pendiente');
         for (const report of pendingReports) {
@@ -442,7 +456,6 @@ function MainApp() {
       setCurrentStepId(nextStepId);
       setInputValue('');
 
-      // Guardar flujo parcial en backend
       if (isConnected && ws.current && ws.current.readyState === WebSocket.OPEN) {
         ws.current.send(
           JSON.stringify({
@@ -463,7 +476,6 @@ function MainApp() {
           },
         ]);
       } else if (nextStepId === '0') {
-        // Guardar informe
         saveReport(selectedFlow.id, selectedFlow.title[0].text, newHistory).then(report => {
           if (isConnected && ws.current && ws.current.readyState === WebSocket.OPEN) {
             ws.current.send(JSON.stringify({ type: 'REPORT', data: report }));
@@ -489,7 +501,6 @@ function MainApp() {
       setHistory(newHistory);
       setCurrentStepId(nextStepId);
 
-      // Guardar flujo parcial en backend
       if (isConnected && ws.current && ws.current.readyState === WebSocket.OPEN) {
         ws.current.send(
           JSON.stringify({
@@ -510,7 +521,6 @@ function MainApp() {
           },
         ]);
       } else if (nextStepId === '0') {
-        // Guardar informe
         saveReport(selectedFlow.id, selectedFlow.title[0].text, newHistory).then(report => {
           if (isConnected && ws.current && ws.current.readyState === WebSocket.OPEN) {
             ws.current.send(JSON.stringify({ type: 'REPORT', data: report }));
@@ -573,6 +583,7 @@ function MainApp() {
 
   // Pantalla intermedia: descripción del flujo y opciones
   if (selectedFlow && !currentStepId && !showReports && !selectedReport) {
+    const { duracionEstimada } = processFlow(selectedFlow);
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.connectionStatus}>
@@ -582,6 +593,7 @@ function MainApp() {
         </View>
         <Text style={styles.flowTitle}>{selectedFlow.title[0].text}</Text>
         <Text style={styles.flowDescription}>{selectedFlow.description?.[0]?.text || 'Descripción no disponible.'}</Text>
+        <Text style={styles.estimatedTime}>Duración estimada: {duracionEstimada} minutos</Text>
         <TouchableOpacity style={styles.actionButton} onPress={handleStartFlow} activeOpacity={0.7}>
           <Text style={styles.buttonText}>Crear Informe</Text>
         </TouchableOpacity>
@@ -613,8 +625,11 @@ function MainApp() {
             renderItem={({ item }) => (
               <View style={styles.historyItem}>
                 <Text style={styles.historyText}>
-                  Flujo: {item.flowName} ({item.timestamp}) - Estado: {item.estado}
+                  Flujo: {item.flowName} ({item.timestamp}) - Estado: {item.estado} - Usuario: {item.user}
                 </Text>
+                {item.timeRemaining !== undefined && item.estado === 'Sincronizado' && (
+                  <Text style={styles.historySubText}>Tiempo restante para borrado: {item.timeRemaining} días</Text>
+                )}
                 <FlatList
                   data={item.history}
                   keyExtractor={(step, index) => index.toString()}
@@ -643,8 +658,12 @@ function MainApp() {
         {selectedReport ? (
           <View style={styles.historyItem}>
             <Text style={styles.historyText}>
-              Flujo: {selectedReport.flowName} ({selectedReport.timestamp}) - Estado: {selectedReport.estado}
+              Flujo: {selectedReport.flowName} ({selectedReport.timestamp}) - Estado: {selectedReport.estado} - Usuario:{' '}
+              {selectedReport.user}
             </Text>
+            {selectedReport.timeRemaining !== undefined && selectedReport.estado === 'Sincronizado' && (
+              <Text style={styles.historySubText}>Tiempo restante para borrado: {selectedReport.timeRemaining} días</Text>
+            )}
             <FlatList
               data={selectedReport.history}
               keyExtractor={(step, index) => index.toString()}
