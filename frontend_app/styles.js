@@ -239,6 +239,7 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 5,
     marginVertical: 5,
+    marginBottom: 10,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
@@ -270,6 +271,28 @@ const styles = StyleSheet.create({
   connectionText: {
     fontSize: 14,
     fontWeight: 'bold',
+  },
+  remainingTimeGreen: {
+    color: '#34C759',
+    fontWeight: 'bold',
+  },
+  remainingTimeOrange: {
+    color: '#FF9500',
+    fontWeight: 'bold',
+  },
+  remainingTimeRed: {
+    color: '#FF3B30',
+    fontWeight: 'bold',
+  },
+  greenItem: {
+    backgroundColor: '#E8F5E9',
+    borderLeftWidth: 4,
+    borderLeftColor: '#4CAF50',
+  },
+  redItem: {
+    backgroundColor: '#FFEBEE',
+    borderLeftWidth: 4,
+    borderLeftColor: '#F44336',
   },
   loadingContainer: {
     flex: 1,

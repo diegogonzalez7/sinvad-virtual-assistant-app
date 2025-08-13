@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, FlatList, TextInput, Alert, ActivityIndicator } from 'react-native';
+import { ScrollView, View, Text, TouchableOpacity, FlatList, TextInput, Alert, ActivityIndicator } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import Feather from '@expo/vector-icons/Feather';
@@ -131,19 +131,25 @@ async function markReportAsSynchronized(timestamp) {
 async function getReports(setReports, flowId = null) {
   try {
     const reports = JSON.parse((await AsyncStorage.getItem('reports')) || '[]');
-    const lastCleanup = await AsyncStorage.getItem('lastCleanup');
     const now = new Date();
-    const oneWeekInMs = 7 * 24 * 60 * 60 * 1000;
+    const oneWeekInMs = 7 * 24 * 60 * 60 * 1000; // 7 días en milisegundos
 
-    const updatedReports = reports.map(report => {
-      if (report.estado === 'Sincronizado' && lastCleanup) {
-        const lastCleanupDate = new Date(lastCleanup);
-        const timeRemainingMs = oneWeekInMs - (now - lastCleanupDate);
-        const timeRemaining = timeRemainingMs > 0 ? Math.ceil(timeRemainingMs / (1000 * 60 * 60 * 24)) : 0; // Días restantes
+    // Filtrar informes vencidos (más de 7 días desde timestamp)
+    const updatedReports = reports
+      .filter(report => {
+        const reportTime = new Date(report.timestamp);
+        const timeElapsedMs = now - reportTime;
+        return timeElapsedMs <= oneWeekInMs; // Mantener solo los informes 7 días
+      })
+      .map(report => {
+        const reportTime = new Date(report.timestamp);
+        const timeElapsedMs = now - reportTime;
+        const timeRemainingMs = oneWeekInMs - timeElapsedMs;
+        const timeRemaining = timeRemainingMs > 0 ? Math.ceil(timeRemainingMs / (1000 * 60)) : 0; // Minutos restantes
         return { ...report, timeRemaining };
-      }
-      return report;
-    });
+      });
+
+    await AsyncStorage.setItem('reports', JSON.stringify(updatedReports));
 
     if (flowId) {
       const filteredReports = updatedReports.filter(report => report.flowId === flowId);
@@ -246,6 +252,49 @@ async function loadFlowsFromStorage() {
     return null;
   }
 }
+
+// Función auxiliar para calcular el tiempo restante para el borrado automático
+const formatRemainingTime = minutes => {
+  const totalMinutes = minutes;
+  const remainingMinutes = Math.floor(totalMinutes % 60);
+  const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+  const days = Math.floor(totalMinutes / (24 * 60));
+
+  let result = [];
+  if (days > 0) {
+    result.push(days > 1 ? `${days} días` : `${days} día`);
+  }
+  if (hours > 0) {
+    result.push(`${hours} horas`);
+  }
+  if (remainingMinutes > 0) {
+    result.push(`${remainingMinutes} minutos`);
+  }
+
+  return result.length > 0 ? result.join(' y ') : '0 minutos';
+};
+
+// Función auxiliar para formatear el timestamp
+const formatTimestamp = timestamp => {
+  const date = new Date(timestamp);
+  return `${date.getDate()} de ${date.toLocaleString('es-ES', { month: 'long' })} de ${date.getFullYear()}, ${date.getHours()}:${date
+    .getMinutes()
+    .toString()
+    .padStart(2, '0')}`;
+};
+
+// Función auxiliar para determinar el color del tiempo restante
+const getTimeColor = timeRemaining => {
+  const maxMinutes = 7 * 24 * 60; // 10,080 minutos
+  const percentage = (timeRemaining / maxMinutes) * 100;
+  return percentage >= 50 ? styles.remainingTimeGreen : percentage >= 15 ? styles.remainingTimeOrange : styles.remainingTimeRed;
+};
+
+// Función auxiliar para determinar el estilo del informe
+const getItemStyle = history => {
+  const lastStep = history[history.length - 1]?.stepTitle || '';
+  return lastStep === 'InfPos' ? styles.greenItem : styles.redItem;
+};
 
 function MainApp() {
   const insets = useSafeAreaInsets();
@@ -368,27 +417,8 @@ function MainApp() {
         }
       });
 
-      const checkAndClearReports = async () => {
-        const lastCleanup = await AsyncStorage.getItem('lastCleanup');
-        const now = new Date();
-        const oneWeekInMs = 7 * 24 * 60 * 60 * 1000;
-
-        if (!lastCleanup) {
-          await AsyncStorage.setItem('lastCleanup', now.toISOString());
-        } else {
-          const lastCleanupDate = new Date(lastCleanup);
-          if (now - lastCleanupDate >= oneWeekInMs) {
-            await clearReportsSilently(setReports);
-          }
-        }
-      };
-
-      checkAndClearReports();
-      const intervalId = setInterval(checkAndClearReports, 24 * 60 * 60 * 1000);
-
       return () => {
         unsubscribe();
-        clearInterval(intervalId);
         if (ws.current) {
           ws.current.close();
           ws.current = null;
@@ -592,7 +622,7 @@ function MainApp() {
   if (selectedFlow && !currentStepId && !showReports && !selectedReport) {
     const { duracionEstimada } = processFlow(selectedFlow);
     return (
-      <View style={[styles.container, { paddingTop: insets.top, flex: 1 }]}>
+      <ScrollView style={[styles.container, { paddingTop: insets.top, flex: 1 }]}>
         <View style={styles.content}>
           <View style={[styles.connectionStatus, { marginBottom: 5 }]}>
             <Feather name={isConnected ? 'wifi' : 'wifi-off'} size={24} color={isConnected ? 'green' : 'red'} style={{ marginRight: 8 }} />
@@ -627,7 +657,7 @@ function MainApp() {
             <Text style={styles.buttonText}>Volver</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </ScrollView>
     );
   }
 
@@ -636,6 +666,13 @@ function MainApp() {
     const title = selectedFlow ? `Informes de ${selectedFlow.title[0].text}` : 'Todos los Informes';
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
+        <View style={[styles.connectionStatus, { marginBottom: 5 }]}>
+          <Feather name={isConnected ? 'wifi' : 'wifi-off'} size={24} color={isConnected ? 'green' : 'red'} style={{ marginRight: 8 }} />
+          <Text style={[styles.connectionText, isConnected ? styles.connected : styles.disconnected]}>
+            {isConnected ? 'Conectado' : 'Sin conexión'}
+          </Text>
+        </View>
+
         <Text style={styles.title}>{title}</Text>
         {reports.length === 0 ? (
           <Text style={styles.noReportText}>No hay informes disponibles.</Text>
@@ -643,25 +680,37 @@ function MainApp() {
           <FlatList
             data={reports}
             keyExtractor={(item, index) => index.toString()}
-            renderItem={({ item }) => (
-              <View style={styles.historyItem}>
-                <Text style={styles.historyText}>
-                  Flujo: {item.flowName} ({item.timestamp}) - Estado: {item.estado} - Usuario: {item.user}
-                </Text>
-                {item.timeRemaining !== undefined && item.estado === 'Sincronizado' && (
-                  <Text style={styles.historySubText}>Tiempo restante para borrado: {item.timeRemaining} días</Text>
-                )}
-                <FlatList
-                  data={item.history}
-                  keyExtractor={(step, index) => index.toString()}
-                  renderItem={({ item: step }) => (
-                    <Text style={styles.historySubText}>
-                      - Paso: {step.stepTitle}, Respuesta: {step.option}
+            renderItem={({ item }) => {
+              const formattedDate = formatTimestamp(item.timestamp);
+              const timeColor = getTimeColor(item.timeRemaining);
+              const itemStyle = getItemStyle(item.history);
+
+              return (
+                <View style={[styles.historyItem, itemStyle]}>
+                  <Text style={styles.historyText}>Flujo: {item.flowName}</Text>
+                  <Text style={styles.historySubText}>Informe realizado el {formattedDate}.</Text>
+                  <Text style={styles.historySubText}>Estado: {item.estado}.</Text>
+                  <Text style={styles.historySubText}>Usuario: {item.user}.</Text>
+                  <View style={{ height: 10 }} />
+                  <Text style={styles.historySubText}>Detalles del informe:</Text>
+                  <FlatList
+                    data={item.history}
+                    keyExtractor={(step, index) => index.toString()}
+                    renderItem={({ item: step }) => (
+                      <Text style={styles.historySubText}>
+                        - Paso: {step.stepTitle}, Respuesta: {step.option}
+                      </Text>
+                    )}
+                  />
+                  <View style={{ height: 10 }} />
+                  {item.timeRemaining !== undefined && item.estado === 'Sincronizado' && (
+                    <Text style={[styles.historySubText, timeColor]}>
+                      Tiempo restante para borrado: {formatRemainingTime(item.timeRemaining)}
                     </Text>
                   )}
-                />
-              </View>
-            )}
+                </View>
+              );
+            }}
           />
         )}
         <TouchableOpacity style={styles.backButton} onPress={() => setShowReports(false)} activeOpacity={0.7}>
