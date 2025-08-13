@@ -592,28 +592,41 @@ function MainApp() {
   if (selectedFlow && !currentStepId && !showReports && !selectedReport) {
     const { duracionEstimada } = processFlow(selectedFlow);
     return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        <View style={styles.connectionStatus}>
-          <Feather name={isConnected ? 'wifi' : 'wifi-off'} size={24} color={isConnected ? 'green' : 'red'} style={{ marginRight: 8 }} />
-          <Text style={[styles.connectionText, isConnected ? styles.connected : styles.disconnected]}>
-            {isConnected ? 'Conectado' : 'Sin conexión'}
-          </Text>
+      <View style={[styles.container, { paddingTop: insets.top, flex: 1 }]}>
+        <View style={styles.content}>
+          <View style={[styles.connectionStatus, { marginBottom: 5 }]}>
+            <Feather name={isConnected ? 'wifi' : 'wifi-off'} size={24} color={isConnected ? 'green' : 'red'} style={{ marginRight: 8 }} />
+            <Text style={[styles.connectionText, isConnected ? styles.connected : styles.disconnected]}>
+              {isConnected ? 'Conectado' : 'Sin conexión'}
+            </Text>
+          </View>
+
+          <Text style={[styles.flowTitle, { marginTop: 10 }]}>{selectedFlow.title[0].text}</Text>
+          <View style={styles.descriptionCard}>
+            <Text style={styles.flowDescription}>{selectedFlow.description?.[0]?.text || 'Descripción no disponible.'}</Text>
+          </View>
+
+          <View style={styles.estimatedTimeWrapper}>
+            <View style={styles.estimatedTimeContainer}>
+              <Text style={styles.estimatedTime}>⏱ Duración estimada: {duracionEstimada} minutos</Text>
+            </View>
+          </View>
         </View>
-        <Text style={styles.flowTitle}>{selectedFlow.title[0].text}</Text>
-        <Text style={styles.flowDescription}>{selectedFlow.description?.[0]?.text || 'Descripción no disponible.'}</Text>
-        <Text style={styles.estimatedTime}>Duración estimada: {duracionEstimada} minutos</Text>
-        <TouchableOpacity style={styles.actionButton} onPress={handleStartFlow} activeOpacity={0.7}>
-          <Text style={styles.buttonText}>Crear Informe</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.actionButton} onPress={() => handleShowReports(selectedFlow.id)} activeOpacity={0.7}>
-          <Text style={styles.buttonText}>Ver Informes</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.actionButton} onPress={handleShowLatestReport} activeOpacity={0.7}>
-          <Text style={styles.buttonText}>Ver Último Informe</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.backButton} onPress={() => setSelectedFlow(null)} activeOpacity={0.7}>
-          <Text style={styles.buttonText}>Volver</Text>
-        </TouchableOpacity>
+
+        <View style={styles.buttonContainer}>
+          <TouchableOpacity style={styles.actionButton} onPress={handleStartFlow} activeOpacity={0.7}>
+            <Text style={styles.buttonText}>Crear Informe</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionButton} onPress={() => handleShowReports(selectedFlow.id)} activeOpacity={0.7}>
+            <Text style={styles.buttonText}>Ver Informes</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionButton} onPress={handleShowLatestReport} activeOpacity={0.7}>
+            <Text style={styles.buttonText}>Ver Último Informe</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.backButton} onPress={() => setSelectedFlow(null)} activeOpacity={0.7}>
+            <Text style={styles.buttonText}>Volver</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }

@@ -6,6 +6,10 @@ const styles = StyleSheet.create({
     padding: 20,
     backgroundColor: '#f5f5f5',
   },
+  content: {
+    flex: 1,
+    paddingBottom: 10,
+  },
   title: {
     fontSize: 26,
     fontWeight: 'bold',
@@ -45,6 +49,44 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 3,
   },
+  buttonContainer: {
+    flexDirection: 'column',
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    backgroundColor: '#f5f5f5',
+  },
+  descriptionCard: {
+    backgroundColor: '#FFFFFF',
+    paddingLeft: 10,
+    paddingRight: 10,
+    paddingTop: 10,
+    borderRadius: 10,
+    marginVertical: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+    width: '100%',
+  },
+  estimatedTimeWrapper: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginVertical: 20,
+  },
+  estimatedTimeContainer: {
+    backgroundColor: '#E8F0FE',
+    padding: 5,
+    borderRadius: 8,
+    marginVertical: 15,
+    alignItems: 'center',
+  },
+  estimatedTime: {
+    fontSize: 15,
+    color: '#007AFF',
+    fontWeight: '600',
+  },
   actionButton: {
     backgroundColor: '#007AFF',
     padding: 15,
@@ -56,6 +98,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 3,
     elevation: 3,
+    minWidth: '100%',
+    alignSelf: 'center',
   },
   allReportsButton: {
     backgroundColor: '#5856D6',
@@ -104,6 +148,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 3,
     elevation: 3,
+    minWidth: '100%',
+    alignSelf: 'center',
   },
   restartButton: {
     backgroundColor: '#FF9500',
