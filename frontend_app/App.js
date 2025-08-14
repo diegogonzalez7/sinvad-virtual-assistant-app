@@ -801,18 +801,33 @@ function MainApp() {
 
   // Pantalla final con historial
   if (currentStepId === '0') {
+    const formattedHistory = history.map(item => ({
+      ...item,
+      timestamp: formatTimestamp(item.timestamp || history[0]?.timestamp || new Date().toISOString()), // Usar timestamp del historial o general
+    }));
+    const itemStyle = getItemStyle(history);
+
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
+        <View style={[styles.connectionStatus, { marginBottom: 5 }]}>
+          <Feather name={isConnected ? 'wifi' : 'wifi-off'} size={24} color={isConnected ? 'green' : 'red'} style={{ marginRight: 8 }} />
+          <Text style={[styles.connectionText, isConnected ? styles.connected : styles.disconnected]}>
+            {isConnected ? 'Conectado' : 'Sin conexión'}
+          </Text>
+        </View>
+
         <Text style={styles.title}>Flujo finalizado</Text>
+
         <Text style={styles.subtitle}>Historial de respuestas:</Text>
         <FlatList
-          data={history}
+          data={formattedHistory}
           keyExtractor={(item, index) => index.toString()}
           renderItem={({ item }) => (
-            <View style={styles.historyItem}>
+            <View style={[styles.historyItem, itemStyle]}>
               <Text style={styles.historyText}>
                 Paso: {item.stepTitle} - Respuesta: {item.option}
               </Text>
+              <Text style={styles.historySubText}>Realizado: {item.timestamp}</Text>
             </View>
           )}
         />
