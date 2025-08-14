@@ -328,6 +328,7 @@ function MainApp() {
   const ws = useRef(null);
   const reconnectAttempts = useRef(0);
   const maxReconnectAttempts = 12;
+  const flatListRef = useRef(null);
 
   const connectWebSocket = () => {
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
@@ -856,57 +857,122 @@ function MainApp() {
     : [];
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.connectionStatus}>
+    <View style={[styles.container, { paddingTop: insets.top, flex: 1 }]}>
+      <View style={[styles.connectionStatus, { marginBottom: 5 }]}>
         <Feather name={isConnected ? 'wifi' : 'wifi-off'} size={24} color={isConnected ? 'green' : 'red'} style={{ marginRight: 8 }} />
         <Text style={[styles.connectionText, isConnected ? styles.connected : styles.disconnected]}>
           {isConnected ? 'Conectado' : 'Sin conexión'}
         </Text>
       </View>
+
+      <Text style={[styles.title, { fontSize: 18, marginBottom: 10 }]}>{selectedFlow?.title[0].text || 'Flujo sin título'}</Text>
+
       <FlatList
+        ref={flatListRef}
         data={messages}
         keyExtractor={item => item.id.toString()}
         renderItem={({ item: message }) => (
-          <View style={[styles.messageBubble, message.isUser ? styles.userBubble : styles.assistantBubble]}>
-            <Text style={[styles.messageText, message.isUser ? styles.userText : styles.assistantText]}>{message.text}</Text>
+          <View
+            style={[
+              styles.messageBubble,
+              message.isUser ? styles.userBubble : styles.assistantBubble,
+              { alignSelf: message.isUser ? 'flex-end' : 'flex-start' },
+            ]}
+          >
+            <Text style={[styles.messageText, message.isUser ? styles.userText : styles.assistantText, { fontSize: 16, lineHeight: 24 }]}>
+              {message.text}
+            </Text>
           </View>
         )}
-        contentContainerStyle={{ paddingBottom: 20 }}
+        contentContainerStyle={{ paddingBottom: 20, paddingHorizontal: 10, flexGrow: 1 }}
+        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
       />
-      <View style={styles.inputContainer}>
-        {options.length > 0 && options[0].isTextInput ? (
-          <View style={styles.inputWrapper}>
-            <TextInput
-              style={styles.textInput}
-              value={inputValue}
-              onChangeText={setInputValue}
-              placeholder="Ingresa el identificador (ej. XYZ123)"
+
+      {step && currentStepId !== '0' && (
+        <View style={styles.optionsContainer}>
+          {options.length > 0 && options[0].isTextInput ? (
+            <View style={styles.inputWrapper}>
+              <TextInput
+                style={[styles.textInput, { fontSize: 16 }]}
+                value={inputValue}
+                onChangeText={setInputValue}
+                placeholder="Ingresa el identificador (ej. XYZ123)"
+              />
+              <TouchableOpacity
+                style={[styles.optionButton, !inputValue ? styles.disabledButton : {}]}
+                onPress={() => handleOptionPress(inputValue)}
+                disabled={!inputValue}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.buttonText, { fontSize: 16 }]}>Continuar</Text>
+              </TouchableOpacity>
+            </View>
+          ) : options.length > 0 ? (
+            <FlatList
+              data={options}
+              keyExtractor={(item, index) => index.toString()}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[styles.optionButton, { backgroundColor: '#BBDEFB' }]}
+                  onPress={() => handleOptionPress(item.text)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.buttonText, { color: '#0D47A1', fontSize: 16 }]}>{item.text}</Text>
+                </TouchableOpacity>
+              )}
+              contentContainerStyle={{ paddingVertical: 5 }}
             />
+          ) : (
             <TouchableOpacity
-              style={[styles.optionButton, !inputValue ? styles.disabledButton : {}]}
-              onPress={() => handleOptionPress(inputValue)}
-              disabled={!inputValue}
+              style={[styles.continueButton, { backgroundColor: '#4CAF50' }]} // Verde para "Continuar"
+              onPress={handleContinue}
               activeOpacity={0.7}
             >
-              <Text style={styles.buttonText}>Continuar</Text>
+              <Text style={[styles.buttonText, { color: '#FFFFFF', fontSize: 16 }]}>Continuar</Text>
             </TouchableOpacity>
-          </View>
-        ) : options.length > 0 ? (
-          <FlatList
-            data={options}
-            keyExtractor={(item, index) => index.toString()}
-            renderItem={({ item }) => (
-              <TouchableOpacity style={styles.optionButton} onPress={() => handleOptionPress(item.text)} activeOpacity={0.7}>
-                <Text style={styles.buttonText}>{item.text}</Text>
-              </TouchableOpacity>
-            )}
-          />
-        ) : (
-          <TouchableOpacity style={styles.continueButton} onPress={handleContinue} activeOpacity={0.7}>
-            <Text style={styles.buttonText}>Continuar</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+          )}
+        </View>
+      )}
+
+      {currentStepId !== '0' && (
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => {
+            Alert.alert('¿Desea volver?', 'El avance realizado en el flujo se descartará.', [
+              { text: 'Cancelar', style: 'cancel' },
+              {
+                text: 'Sí',
+                onPress: () => {
+                  setCurrentStepId(null);
+                  setMessages([]);
+                  setInputValue('');
+                },
+              },
+            ]);
+          }}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.buttonText, { fontSize: 16 }]}>Volver</Text>
+        </TouchableOpacity>
+      )}
+
+      {currentStepId === '0' && (
+        <TouchableOpacity
+          style={styles.continueButton} // Verde por defecto
+          onPress={() => {
+            setSelectedFlow(null);
+            setCurrentStepId(null);
+            setHistory([]);
+            setMessages([]);
+            setInputValue('');
+            setShowReports(false);
+            setSelectedReport(null);
+          }}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.buttonText, { color: '#FFFFFF', fontSize: 16 }]}>Continuar</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
