@@ -134,12 +134,12 @@ async function getReports(setReports, flowId = null) {
     const now = new Date();
     const oneWeekInMs = 7 * 24 * 60 * 60 * 1000; // 7 días en milisegundos
 
-    // Filtrar informes vencidos (más de 7 días desde timestamp)
+    // Filtrar informes vencidos (más de 7 días desde timestamp), pero no limpiar si no hay conexión
     const updatedReports = reports
       .filter(report => {
         const reportTime = new Date(report.timestamp);
         const timeElapsedMs = now - reportTime;
-        return timeElapsedMs <= oneWeekInMs; // Mantener solo los informes 7 días
+        return timeElapsedMs <= oneWeekInMs || !isConnected; // Mantener informes si no hay conexión
       })
       .map(report => {
         const reportTime = new Date(report.timestamp);
@@ -296,6 +296,21 @@ const getItemStyle = history => {
   return lastStep === 'InfPos' ? styles.greenItem : styles.redItem;
 };
 
+// Función para sincronizar informes pendientes al recuperar la conexión
+async function syncPendingReports(ws) {
+  try {
+    const reports = JSON.parse((await AsyncStorage.getItem('reports')) || '[]');
+    const pendingReports = reports.filter(report => report.estado === 'Pendiente');
+    if (pendingReports.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
+      for (const report of pendingReports) {
+        ws.send(JSON.stringify({ type: 'REPORT', data: report }));
+      }
+    }
+  } catch (error) {
+    console.log('Error synchronizing pending reports:', error);
+  }
+}
+
 function MainApp() {
   const insets = useSafeAreaInsets();
 
@@ -312,17 +327,22 @@ function MainApp() {
   const [isConnected, setIsConnected] = useState(false);
   const ws = useRef(null);
   const reconnectAttempts = useRef(0);
-  const maxReconnectAttempts = 5;
+  const maxReconnectAttempts = 12;
 
-  // Manejar conexión WebSocket
   const connectWebSocket = () => {
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      return; // Evitar conexiones duplicadas
+    }
+
     ws.current = new WebSocket(WS_URL);
 
     ws.current.onopen = () => {
       console.log('WebSocket conectado');
-      reconnectAttempts.current = 0;
+      reconnectAttempts.current = 0; // Reiniciar intentos al conectar
       setIsConnected(true);
       ws.current.send(JSON.stringify({ type: 'PIN', data: PIN }));
+      // Sincronizar informes pendientes al reconectar
+      syncPendingReports();
     };
 
     ws.current.onmessage = event => {
@@ -376,21 +396,28 @@ function MainApp() {
       }
     };
 
-    ws.current.onclose = () => {
-      console.log('WebSocket desconectado');
+    ws.current.onerror = error => {
+      console.error('Error WebSocket:', error.message);
       setIsConnected(false);
-      if (reconnectAttempts.current < maxReconnectAttempts) {
-        reconnectAttempts.current += 1;
-        setTimeout(connectWebSocket, 3000 * reconnectAttempts.current);
-      }
     };
 
-    ws.current.onerror = err => {
-      console.log('Error WebSocket:', err);
+    ws.current.onclose = event => {
+      console.log('WebSocket desconectado', event);
+      setIsConnected(false);
+
+      // Lógica de reconexión con backoff exponencial
+      if (reconnectAttempts.current < maxReconnectAttempts) {
+        const delay = Math.min(Math.pow(2, reconnectAttempts.current) * 60 * 1000, 6 * 60 * 60 * 1000); // 1min, 2min, 4min, ... max 6h
+        console.log(`Reintentando conexión en ${delay / 60000} segundos...`);
+        reconnectAttempts.current += 1;
+        setTimeout(connectWebSocket, delay);
+      } else {
+        console.log('Máximo de reintentos alcanzado. Conexión fallida.');
+      }
     };
   };
 
-  // Inicializar aplicación y manejar borrado periódico
+  // Inicializar aplicación y manejar conexión
   useEffect(() => {
     const initializeApp = async () => {
       setIsLoading(true);
