@@ -190,11 +190,11 @@ const styles = StyleSheet.create({
   },
   assistantBubble: {
     backgroundColor: '#E0E0E0',
-    marginLeft: 10,
+    marginLeft: 0,
   },
   userBubble: {
     backgroundColor: '#BBDEFB',
-    marginRight: 10,
+    marginRight: 0,
   },
   messageText: {
     fontSize: 16,
