@@ -722,31 +722,49 @@ function MainApp() {
 
   // Pantalla de último informe
   if (selectedReport) {
+    const formattedDate = formatTimestamp(selectedReport.timestamp);
+    const timeColor = getTimeColor(selectedReport.timeRemaining);
+    const itemStyle = getItemStyle(selectedReport.history);
+
     return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
+      <View style={[styles.container, { paddingTop: insets.top, flex: 1 }]}>
+        <View style={[styles.connectionStatus, { marginBottom: 5 }]}>
+          <Feather name={isConnected ? 'wifi' : 'wifi-off'} size={24} color={isConnected ? 'green' : 'red'} style={{ marginRight: 8 }} />
+          <Text style={[styles.connectionText, isConnected ? styles.connected : styles.disconnected]}>
+            {isConnected ? 'Conectado' : 'Sin conexión'}
+          </Text>
+        </View>
+
         <Text style={styles.title}>Último Informe de {selectedFlow.title[0].text}</Text>
-        {selectedReport ? (
-          <View style={styles.historyItem}>
-            <Text style={styles.historyText}>
-              Flujo: {selectedReport.flowName} ({selectedReport.timestamp}) - Estado: {selectedReport.estado} - Usuario:{' '}
-              {selectedReport.user}
-            </Text>
-            {selectedReport.timeRemaining !== undefined && selectedReport.estado === 'Sincronizado' && (
-              <Text style={styles.historySubText}>Tiempo restante para borrado: {selectedReport.timeRemaining} días</Text>
-            )}
-            <FlatList
-              data={selectedReport.history}
-              keyExtractor={(step, index) => index.toString()}
-              renderItem={({ item: step }) => (
-                <Text style={styles.historySubText}>
-                  - Paso: {step.stepTitle}, Respuesta: {step.option}
+        <View style={{ flex: 1 }}>
+          {selectedReport ? (
+            <View style={[styles.historyItem, itemStyle]}>
+              <Text style={styles.historyText}>Flujo: {selectedReport.flowName}</Text>
+              <Text style={styles.historySubText}>Informe realizado el {formattedDate}.</Text>
+              <Text style={styles.historySubText}>Estado: {selectedReport.estado}.</Text>
+              <Text style={styles.historySubText}>Usuario: {selectedReport.user}.</Text>
+              <View style={{ height: 10 }} />
+              <Text style={styles.historySubText}>Detalles del informe:</Text>
+              <FlatList
+                data={selectedReport.history}
+                keyExtractor={(step, index) => index.toString()}
+                renderItem={({ item: step }) => (
+                  <Text style={styles.historySubText}>
+                    - Paso: {step.stepTitle}, Respuesta: {step.option}
+                  </Text>
+                )}
+              />
+              <View style={{ height: 10 }} />
+              {selectedReport.timeRemaining !== undefined && selectedReport.estado === 'Sincronizado' && (
+                <Text style={[styles.historySubText, timeColor]}>
+                  Tiempo restante para borrado: {formatRemainingTime(selectedReport.timeRemaining)}
                 </Text>
               )}
-            />
-          </View>
-        ) : (
-          <Text style={styles.noReportText}>No hay informes disponibles para este flujo.</Text>
-        )}
+            </View>
+          ) : (
+            <Text style={styles.noReportText}>No hay informes disponibles para este flujo.</Text>
+          )}
+        </View>
         <TouchableOpacity style={styles.backButton} onPress={() => setSelectedReport(null)} activeOpacity={0.7}>
           <Text style={styles.buttonText}>Volver</Text>
         </TouchableOpacity>
