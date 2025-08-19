@@ -13,6 +13,7 @@
     "axios": "^1.11.0",
     "dotenv": "^17.2.1",
     "react-native-geolocation-service": "^5.3.1",
+    "react-native-vector-icons": "^10.3.0",
     "sqlite3": "^5.1.7",
     "ws": "^8.18.3"
   }

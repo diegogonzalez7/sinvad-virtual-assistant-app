@@ -120,8 +120,13 @@ async function saveReport(flowId, flowName, history) {
 async function markReportAsSynchronized(timestamp) {
   try {
     const reports = JSON.parse((await AsyncStorage.getItem('reports')) || '[]');
-    const updatedReports = reports.map(report => (report.timestamp === timestamp ? { ...report, estado: 'Sincronizado' } : report));
+    const updatedReports = reports.map(report => {
+      // Comparar timestamps con tolerancia a diferencias menores (por ejemplo, milisegundos)
+      const isSameTimestamp = Math.abs(new Date(report.timestamp).getTime() - new Date(timestamp).getTime()) < 1000;
+      return isSameTimestamp ? { ...report, estado: 'Sincronizado' } : report;
+    });
     await AsyncStorage.setItem('reports', JSON.stringify(updatedReports));
+    console.log(`Informe con timestamp ${timestamp} marcado como Sincronizado`);
   } catch (error) {
     console.log('Error marking report as synchronized:', error);
   }
@@ -159,8 +164,7 @@ async function getReports(setReports, flowId = null) {
     }
   } catch (error) {
     console.log('Error fetching reports:', error);
-    setReports([]); // Establecer un array vacío para evitar pantallas en blanco
-    Alert.alert('Error', 'No se pudieron cargar los informes.');
+    setReports([]);
   }
 }
 
@@ -173,29 +177,6 @@ async function getLatestReport(flowId, setSelectedReport) {
     setSelectedReport(latestReport || null);
   } catch (error) {
     console.log('Error fetching latest report:', error);
-    Alert.alert('Error', 'No se pudo cargar el último informe.');
-  }
-}
-
-// Función para limpiar todos los informes (sin alerta, solo sincronizados)
-async function clearReportsSilently(setReports) {
-  try {
-    const reports = JSON.parse((await AsyncStorage.getItem('reports')) || '[]');
-    const synchronizedReports = reports.filter(report => report.estado === 'Sincronizado');
-    if (synchronizedReports.length < reports.length) {
-      const updatedReports = reports.filter(report => report.estado !== 'Sincronizado');
-      await AsyncStorage.setItem('reports', JSON.stringify(updatedReports));
-      setReports(updatedReports);
-      await AsyncStorage.setItem('lastCleanup', new Date().toISOString()); // Actualizar la última limpieza
-      console.log('Informes sincronizados borrados silenciosamente y última limpieza registrada.');
-    } else {
-      await AsyncStorage.removeItem('reports');
-      setReports([]);
-      await AsyncStorage.setItem('lastCleanup', new Date().toISOString()); // Actualizar la última limpieza
-      console.log('Todos los informes (solo sincronizados) borrados silenciosamente y última limpieza registrada.');
-    }
-  } catch (error) {
-    console.log('Error limpiando informes:', error);
   }
 }
 
@@ -203,20 +184,15 @@ async function clearReportsSilently(setReports) {
 async function clearReportsWithAlert(setReports) {
   try {
     const reports = JSON.parse((await AsyncStorage.getItem('reports')) || '[]');
-    const synchronizedReports = reports.filter(report => report.estado === 'Sincronizado');
-    if (synchronizedReports.length < reports.length) {
-      const updatedReports = reports.filter(report => report.estado !== 'Sincronizado');
-      await AsyncStorage.setItem('reports', JSON.stringify(updatedReports));
-      setReports(updatedReports);
+    if (reports.length > 0) {
+      await AsyncStorage.removeItem('reports'); // Elimina todos los informes
+      setReports([]); // Actualiza el estado a vacío
       await AsyncStorage.setItem('lastCleanup', new Date().toISOString()); // Actualizar la última limpieza
-      console.log('Informes sincronizados borrados silenciosamente y última limpieza registrada.');
-      Alert.alert('Éxito', 'Todos los informes sincronizados han sido eliminados.');
+      console.log('Todos los informes sincronizados borrados y última limpieza registrada.');
+      Alert.alert('Éxito', 'Todos los informes han sido eliminados.');
     } else {
-      await AsyncStorage.removeItem('reports');
-      setReports([]);
-      await AsyncStorage.setItem('lastCleanup', new Date().toISOString()); // Actualizar la última limpieza
-      console.log('Todos los informes (solo sincronizados) borrados silenciosamente y última limpieza registrada.');
-      Alert.alert('Éxito', 'Todos los informes sincronizados han sido eliminados.');
+      console.log('No hay informes para borrar.');
+      Alert.alert('Información', 'No hay informes para eliminar.');
     }
   } catch (error) {
     console.log('Error limpiando informes:', error);
@@ -301,10 +277,15 @@ async function syncPendingReports(ws) {
   try {
     const reports = JSON.parse((await AsyncStorage.getItem('reports')) || '[]');
     const pendingReports = reports.filter(report => report.estado === 'Pendiente');
+    console.log('Informes pendientes a sincronizar:', pendingReports); // Depuración
     if (pendingReports.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
       for (const report of pendingReports) {
+        console.log('Enviando informe:', report); // Depuración
         ws.send(JSON.stringify({ type: 'REPORT', data: report }));
+        // Opcional: Esperar confirmación (necesitaría un callback o timeout)
       }
+    } else {
+      console.log('No hay informes pendientes o WebSocket no está abierto');
     }
   } catch (error) {
     console.log('Error synchronizing pending reports:', error);
@@ -342,13 +323,14 @@ function MainApp() {
       reconnectAttempts.current = 0; // Reiniciar intentos al conectar
       setIsConnected(true);
       ws.current.send(JSON.stringify({ type: 'PIN', data: PIN }));
-      // Sincronizar informes pendientes al reconectar
-      syncPendingReports();
+      // Sincronizar informes pendientes después de autenticación
+      syncPendingReports(ws.current); // Pasar ws.current explícitamente
     };
 
     ws.current.onmessage = event => {
       try {
         const message = JSON.parse(event.data);
+        console.log('Mensaje recibido:', message); // Depuración
         switch (message.type) {
           case 'AUTH_OK':
             console.log('Autenticación exitosa');
@@ -376,7 +358,7 @@ function MainApp() {
             break;
           case 'REPORT_SAVED':
             console.log(`Informe guardado en backend: ${message.data}`);
-            markReportAsSynchronized(message.data);
+            markReportAsSynchronized(message.data).catch(error => console.log('Error marking report as synchronized:', error));
             break;
           case 'PARTIAL_FLOW_SAVED':
             console.log(`Flujo parcial guardado: ${message.data}`);
@@ -461,11 +443,9 @@ function MainApp() {
   useEffect(() => {
     const syncData = async () => {
       if (isConnected && ws.current && ws.current.readyState === WebSocket.OPEN) {
-        const reports = JSON.parse((await AsyncStorage.getItem('reports')) || '[]');
-        const pendingReports = reports.filter(report => report.estado === 'Pendiente');
-        for (const report of pendingReports) {
-          ws.current.send(JSON.stringify({ type: 'REPORT', data: report }));
-        }
+        await syncPendingReports(ws.current); // Esperar a que se complete
+      } else if (isConnected && (!ws.current || ws.current.readyState === WebSocket.CLOSED)) {
+        connectWebSocket(); // Reconectar si es necesario
       }
     };
     syncData();
@@ -702,45 +682,47 @@ function MainApp() {
         </View>
 
         <Text style={styles.title}>{title}</Text>
-        {reports.length === 0 ? (
-          <Text style={styles.noReportText}>No hay informes disponibles.</Text>
-        ) : (
-          <FlatList
-            data={reports}
-            keyExtractor={(item, index) => index.toString()}
-            renderItem={({ item }) => {
-              const formattedDate = formatTimestamp(item.timestamp);
-              const timeColor = getTimeColor(item.timeRemaining);
-              const itemStyle = getItemStyle(item.history);
+        <View style={{ flex: 1 }}>
+          {reports.length === 0 ? (
+            <Text style={styles.noReportText}>No hay informes disponibles.</Text>
+          ) : (
+            <FlatList
+              data={reports}
+              keyExtractor={(item, index) => index.toString()}
+              renderItem={({ item }) => {
+                const formattedDate = formatTimestamp(item.timestamp);
+                const timeColor = getTimeColor(item.timeRemaining);
+                const itemStyle = getItemStyle(item.history);
 
-              return (
-                <View style={[styles.historyItem, itemStyle]}>
-                  <Text style={styles.historyText}>Flujo: {item.flowName}</Text>
-                  <Text style={styles.historySubText}>Informe realizado el {formattedDate}.</Text>
-                  <Text style={styles.historySubText}>Estado: {item.estado}.</Text>
-                  <Text style={styles.historySubText}>Usuario: {item.user}.</Text>
-                  <View style={{ height: 10 }} />
-                  <Text style={styles.historySubText}>Detalles del informe:</Text>
-                  <FlatList
-                    data={item.history}
-                    keyExtractor={(step, index) => index.toString()}
-                    renderItem={({ item: step }) => (
-                      <Text style={styles.historySubText}>
-                        - Paso: {step.stepTitle}, Respuesta: {step.option}
+                return (
+                  <View style={[styles.historyItem, itemStyle]}>
+                    <Text style={styles.historyText}>Flujo: {item.flowName}</Text>
+                    <Text style={styles.historySubText}>Informe realizado el {formattedDate}.</Text>
+                    <Text style={styles.historySubText}>Estado: {item.estado}.</Text>
+                    <Text style={styles.historySubText}>Usuario: {item.user}.</Text>
+                    <View style={{ height: 10 }} />
+                    <Text style={styles.historySubText}>Detalles del informe:</Text>
+                    <FlatList
+                      data={item.history}
+                      keyExtractor={(step, index) => index.toString()}
+                      renderItem={({ item: step }) => (
+                        <Text style={styles.historySubText}>
+                          - Paso: {step.stepTitle}, Respuesta: {step.option}
+                        </Text>
+                      )}
+                    />
+                    <View style={{ height: 10 }} />
+                    {item.timeRemaining !== undefined && item.estado === 'Sincronizado' && (
+                      <Text style={[styles.historySubText, timeColor]}>
+                        Tiempo restante para borrado: {formatRemainingTime(item.timeRemaining)}
                       </Text>
                     )}
-                  />
-                  <View style={{ height: 10 }} />
-                  {item.timeRemaining !== undefined && item.estado === 'Sincronizado' && (
-                    <Text style={[styles.historySubText, timeColor]}>
-                      Tiempo restante para borrado: {formatRemainingTime(item.timeRemaining)}
-                    </Text>
-                  )}
-                </View>
-              );
-            }}
-          />
-        )}
+                  </View>
+                );
+              }}
+            />
+          )}
+        </View>
         <TouchableOpacity style={styles.backButton} onPress={() => setShowReports(false)} activeOpacity={0.7}>
           <Text style={styles.buttonText}>Volver</Text>
         </TouchableOpacity>
