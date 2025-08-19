@@ -1,6 +1,7 @@
 import { StyleSheet } from 'react-native';
 
 const styles = StyleSheet.create({
+  // Estilos globales
   container: {
     flex: 1,
     padding: 20,
@@ -10,97 +11,23 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingBottom: 10,
   },
-  title: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  flowTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#007AFF',
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  flowDescription: {
-    fontSize: 16,
-    color: '#333',
-    marginBottom: 20,
-    textAlign: 'center',
-    lineHeight: 24,
-  },
-  subtitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333',
-    marginVertical: 10,
-  },
-  flowButton: {
-    backgroundColor: '#007AFF',
-    padding: 15,
-    borderRadius: 10,
-    marginVertical: 5,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  buttonContainer: {
-    flexDirection: 'column',
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-    backgroundColor: '#f5f5f5',
-  },
-  descriptionCard: {
-    backgroundColor: '#FFFFFF',
-    paddingLeft: 10,
-    paddingRight: 10,
-    paddingTop: 10,
-    borderRadius: 10,
-    marginVertical: 15,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-    width: '100%',
-  },
-  estimatedTimeWrapper: {
+
+  // Pantalla de carga
+  loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    marginVertical: 20,
+    backgroundColor: '#f0f4f8',
   },
-  estimatedTimeContainer: {
-    backgroundColor: '#E8F0FE',
-    padding: 5,
-    borderRadius: 8,
-    marginVertical: 15,
-    alignItems: 'center',
-  },
-  estimatedTime: {
-    fontSize: 15,
-    color: '#007AFF',
+  loadingText: {
+    marginTop: 16,
+    fontSize: 20,
     fontWeight: '600',
+    color: '#333',
+    textAlign: 'center',
   },
-  actionButton: {
-    backgroundColor: '#007AFF',
-    padding: 15,
-    borderRadius: 10,
-    marginVertical: 5,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 3,
-    minWidth: '100%',
-    alignSelf: 'center',
-  },
+
+  // Pantalla de selección de flujo
   allReportsButton: {
     backgroundColor: '#5856D6',
     padding: 15,
@@ -125,17 +52,101 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 3,
   },
-  retryButton: {
+  flowButton: {
     backgroundColor: '#007AFF',
     padding: 15,
     borderRadius: 10,
-    marginVertical: 10,
+    marginVertical: 5,
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 3,
     elevation: 3,
+  },
+  title: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+
+  // Pantalla intermedia
+  actionButton: {
+    backgroundColor: '#007AFF',
+    padding: 15,
+    borderRadius: 10,
+    marginVertical: 5,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
+    minWidth: '100%',
+    alignSelf: 'center',
+  },
+  buttonContainer: {
+    flexDirection: 'column',
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    backgroundColor: '#f5f5f5',
+  },
+  descriptionCard: {
+    backgroundColor: '#FFFFFF',
+    paddingLeft: 10,
+    paddingRight: 10,
+    paddingTop: 10,
+    borderRadius: 10,
+    marginVertical: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+    width: '100%',
+  },
+  estimatedTime: {
+    fontSize: 15,
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  estimatedTimeContainer: {
+    backgroundColor: '#E8F0FE',
+    padding: 5,
+    borderRadius: 8,
+    marginVertical: 15,
+    alignItems: 'center',
+  },
+  estimatedTimeWrapper: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginVertical: 20,
+  },
+  flowDescription: {
+    fontSize: 16,
+    color: '#333',
+    marginBottom: 20,
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+  flowTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#007AFF',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+
+  // Pantalla de chat
+  assistantBubble: {
+    backgroundColor: '#E0E0E0',
+    marginLeft: 0,
+  },
+  assistantText: {
+    color: '#212121',
   },
   backButton: {
     backgroundColor: '#FF9500',
@@ -165,22 +176,12 @@ const styles = StyleSheet.create({
     minWidth: '100%',
     alignSelf: 'center',
   },
-  restartButton: {
-    backgroundColor: '#FF9500',
-    padding: 15,
-    borderRadius: 10,
-    marginVertical: 10,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 3,
+  disabledButton: {
+    backgroundColor: '#B0BEC5',
   },
-  buttonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   messageBubble: {
     padding: 10,
@@ -188,38 +189,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     maxWidth: '90%',
   },
-  assistantBubble: {
-    backgroundColor: '#E0E0E0',
-    marginLeft: 0,
-  },
-  userBubble: {
-    backgroundColor: '#BBDEFB',
-    marginRight: 0,
-  },
   messageText: {
     fontSize: 16,
-  },
-  assistantText: {
-    color: '#212121',
-  },
-  userText: {
-    color: '#0D47A1',
-  },
-  inputContainer: {
-    paddingVertical: 10,
-  },
-  inputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  textInput: {
-    flex: 1,
-    height: 40,
-    borderColor: '#CCC',
-    borderWidth: 1,
-    borderRadius: 5,
-    paddingHorizontal: 10,
-    marginRight: 10,
   },
   optionButton: {
     padding: 10,
@@ -232,8 +203,48 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingBottom: 10,
   },
-  disabledButton: {
-    backgroundColor: '#B0BEC5',
+  textInput: {
+    flex: 1,
+    height: 40,
+    borderColor: '#CCC',
+    borderWidth: 1,
+    borderRadius: 5,
+    paddingHorizontal: 10,
+    marginRight: 10,
+  },
+  userBubble: {
+    backgroundColor: '#BBDEFB',
+    marginRight: 0,
+  },
+  userText: {
+    color: '#0D47A1',
+  },
+
+  // Pantalla final
+  restartButton: {
+    backgroundColor: '#FF9500',
+    padding: 15,
+    borderRadius: 10,
+    marginVertical: 10,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  subtitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#333',
+    marginVertical: 10,
+  },
+
+  // Pantallas de informes y último informe
+  greenItem: {
+    backgroundColor: '#E8F5E9',
+    borderLeftWidth: 4,
+    borderLeftColor: '#4CAF50',
   },
   historyItem: {
     backgroundColor: '#FFFFFF',
@@ -247,15 +258,15 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
-  historyText: {
-    fontSize: 16,
-    color: '#333',
-    fontWeight: '600',
-  },
   historySubText: {
     fontSize: 14,
     color: '#333',
     marginLeft: 10,
+  },
+  historyText: {
+    fontSize: 16,
+    color: '#333',
+    fontWeight: '600',
   },
   noReportText: {
     fontSize: 16,
@@ -263,6 +274,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginVertical: 20,
   },
+  redItem: {
+    backgroundColor: '#FFEBEE',
+    borderLeftWidth: 4,
+    borderLeftColor: '#F44336',
+  },
+
+  // Estado de conexión
   connectionStatus: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -272,6 +290,12 @@ const styles = StyleSheet.create({
   connectionText: {
     fontSize: 14,
     fontWeight: 'bold',
+  },
+  connected: {
+    color: '#4CAF50', // texto verde
+  },
+  disconnected: {
+    color: '#F44336', // texto rojo
   },
   remainingTimeGreen: {
     color: '#34C759',
@@ -285,34 +309,12 @@ const styles = StyleSheet.create({
     color: '#FF3B30',
     fontWeight: 'bold',
   },
-  greenItem: {
-    backgroundColor: '#E8F5E9',
-    borderLeftWidth: 4,
-    borderLeftColor: '#4CAF50',
-  },
-  redItem: {
-    backgroundColor: '#FFEBEE',
-    borderLeftWidth: 4,
-    borderLeftColor: '#F44336',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f0f4f8',
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 20,
+
+  // Texto común
+  buttonText: {
+    color: '#FFFFFF',
+    fontSize: 18,
     fontWeight: '600',
-    color: '#333',
-    textAlign: 'center',
-  },
-  connected: {
-    color: '#4CAF50', // texto verde
-  },
-  disconnected: {
-    color: '#F44336', // texto rojo
   },
 });
 

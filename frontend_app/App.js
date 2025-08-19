@@ -858,7 +858,15 @@ function MainApp() {
             style={[
               styles.messageBubble,
               message.isUser ? styles.userBubble : styles.assistantBubble,
-              { alignSelf: message.isUser ? 'flex-end' : 'flex-start' },
+              {
+                alignSelf: message.isUser ? 'flex-end' : 'flex-start',
+                borderRadius: 10,
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.1,
+                shadowRadius: 4,
+                elevation: 2,
+              },
             ]}
           >
             <Text style={[styles.messageText, message.isUser ? styles.userText : styles.assistantText, { fontSize: 16, lineHeight: 24 }]}>
@@ -928,6 +936,7 @@ function MainApp() {
                   setCurrentStepId(null);
                   setMessages([]);
                   setInputValue('');
+                  setHistory([]);
                 },
               },
             ]);
