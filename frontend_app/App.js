@@ -7,8 +7,7 @@ import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-
 import styles from './styles';
 
 // Configuración WebSocket
-const WS_URL = 'ws://192.168.1.20:8080'; //Cambiar la IP por localhost si hacemos pruebas en el ordenador
-const PIN = '123456';
+const WS_URL = 'ws://localhost:8080'; // Cambiar la IP por localhost si haces pruebas en el ordenador
 
 // Función para procesar un flujo y calcular duración estimada
 function processFlow(flow) {
@@ -229,6 +228,26 @@ async function loadFlowsFromStorage() {
   }
 }
 
+// Función para sincronizar informes pendientes al recuperar la conexión
+async function syncPendingReports(ws) {
+  try {
+    const reports = JSON.parse((await AsyncStorage.getItem('reports')) || '[]');
+    const pendingReports = reports.filter(report => report.estado === 'Pendiente');
+    console.log('Informes pendientes a sincronizar:', pendingReports); // Depuración
+    if (pendingReports.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
+      for (const report of pendingReports) {
+        console.log('Enviando informe:', report); // Depuración
+        ws.send(JSON.stringify({ type: 'REPORT', data: report }));
+        // Opcional: Esperar confirmación (necesitaría un callback o timeout)
+      }
+    } else {
+      console.log('No hay informes pendientes o WebSocket no está abierto');
+    }
+  } catch (error) {
+    console.log('Error synchronizing pending reports:', error);
+  }
+}
+
 // Función auxiliar para calcular el tiempo restante para el borrado automático
 const formatRemainingTime = minutes => {
   const totalMinutes = minutes;
@@ -272,26 +291,6 @@ const getItemStyle = history => {
   return lastStep === 'InfPos' ? styles.greenItem : styles.redItem;
 };
 
-// Función para sincronizar informes pendientes al recuperar la conexión
-async function syncPendingReports(ws) {
-  try {
-    const reports = JSON.parse((await AsyncStorage.getItem('reports')) || '[]');
-    const pendingReports = reports.filter(report => report.estado === 'Pendiente');
-    console.log('Informes pendientes a sincronizar:', pendingReports); // Depuración
-    if (pendingReports.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
-      for (const report of pendingReports) {
-        console.log('Enviando informe:', report); // Depuración
-        ws.send(JSON.stringify({ type: 'REPORT', data: report }));
-        // Opcional: Esperar confirmación (necesitaría un callback o timeout)
-      }
-    } else {
-      console.log('No hay informes pendientes o WebSocket no está abierto');
-    }
-  } catch (error) {
-    console.log('Error synchronizing pending reports:', error);
-  }
-}
-
 function MainApp() {
   const insets = useSafeAreaInsets();
 
@@ -304,73 +303,87 @@ function MainApp() {
   const [reports, setReports] = useState([]);
   const [showReports, setShowReports] = useState(false);
   const [selectedReport, setSelectedReport] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
+  const [username, setUsername] = useState('');
+  const [pin, setPin] = useState('');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const ws = useRef(null);
+  const flatListRef = useRef(null);
   const reconnectAttempts = useRef(0);
   const maxReconnectAttempts = 12;
-  const flatListRef = useRef(null);
 
-  const connectWebSocket = () => {
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      return; // Evitar conexiones duplicadas
-    }
-
+  // 🔹 Función para conectar WebSocket con credenciales
+  const connectWebSocket = (user, userPin) => {
     ws.current = new WebSocket(WS_URL);
 
     ws.current.onopen = () => {
       console.log('WebSocket conectado');
-      reconnectAttempts.current = 0; // Reiniciar intentos al conectar
       setIsConnected(true);
-      ws.current.send(JSON.stringify({ type: 'PIN', data: PIN }));
-      // Sincronizar informes pendientes después de autenticación
-      syncPendingReports(ws.current); // Pasar ws.current explícitamente
+
+      // Enviar credenciales al abrir la conexión
+      ws.current.send(JSON.stringify({ type: 'LOGIN', data: { username: user, pin: userPin } }));
+      syncPendingReports(ws.current);
     };
 
     ws.current.onmessage = event => {
       try {
         const message = JSON.parse(event.data);
-        console.log('Mensaje recibido:', message); // Depuración
+        console.log('Mensaje recibido del backend:', message);
+
         switch (message.type) {
           case 'AUTH_OK':
             console.log('Autenticación exitosa');
+            setIsAuthenticated(true);
+            setIsLoading(true); // mostrar "Cargando..." tras login
             ws.current.send(JSON.stringify({ type: 'GET_FLOWS' }));
             break;
+
+          case 'AUTH_ERROR':
+            console.log('Error de autenticación: Credenciales incorrectas');
+            Alert.alert('Error', 'Usuario o PIN incorrectos.');
+            setIsAuthenticated(false);
+            setIsLoading(false);
+            ws.current.close();
+            break;
+
           case 'FLOW':
-            setFlows(prevFlows => {
-              const updatedFlows = [...prevFlows.filter(f => f.id !== message.data.id), message.data];
-              return updatedFlows.sort((a, b) => a.title[0].text.localeCompare(b.title[0].text));
+            setFlows(prev => {
+              const updated = [...prev.filter(f => f.id !== message.data.id), message.data];
+              saveFlowsToStorage(updated); // actualizar almacenamiento local
+              return updated.sort((a, b) => a.title[0].text.localeCompare(b.title[0].text));
             });
             break;
+
           case 'FLOW_REMOVED':
-            setFlows(prevFlows => {
-              const updatedFlows = prevFlows.filter(f => f.id !== message.data);
-              saveFlowsToStorage(updatedFlows);
-              return updatedFlows.sort((a, b) => a.title[0].text.localeCompare(b.title[0].text));
+            setFlows(prev => {
+              const updated = prev.filter(f => f.id !== message.data);
+              saveFlowsToStorage(updated); // actualizar almacenamiento local
+              return updated;
             });
             break;
+
           case 'ALL_FLOWS_SENT':
-            saveFlowsToStorage(flows);
             setIsLoading(false);
             break;
+
           case 'UPDATE_FLOWS':
-            console.log('Actualización de flujos detectada, procesando cambios en tiempo real...');
+            console.log('Actualización de flujos detectada...');
             break;
+
           case 'REPORT_SAVED':
             console.log(`Informe guardado en backend: ${message.data}`);
-            markReportAsSynchronized(message.data).catch(error => console.log('Error marking report as synchronized:', error));
+            markReportAsSynchronized(message.data).catch(console.log);
             break;
+
           case 'PARTIAL_FLOW_SAVED':
             console.log(`Flujo parcial guardado: ${message.data}`);
             break;
-          case 'AUTH_ERROR':
-            console.log('Error de autenticación: PIN incorrecto');
-            setIsConnected(false);
-            ws.current.close();
-            break;
+
           case 'ERROR':
             console.log(`Error del servidor: ${message.data}`);
             break;
+
           default:
             console.log(`Mensaje desconocido: ${message.type}`);
         }
@@ -388,43 +401,26 @@ function MainApp() {
       console.log('WebSocket desconectado', event);
       setIsConnected(false);
 
-      // Lógica de reconexión con backoff exponencial
-      if (reconnectAttempts.current < maxReconnectAttempts) {
-        const delay = Math.min(Math.pow(2, reconnectAttempts.current) * 60 * 1000, 6 * 60 * 60 * 1000); // 1min, 2min, 4min, ... max 6h
-        console.log(`Reintentando conexión en ${delay / 60000} segundos...`);
-        reconnectAttempts.current += 1;
-        setTimeout(connectWebSocket, delay);
-      } else {
-        console.log('Máximo de reintentos alcanzado. Conexión fallida.');
+      if (isAuthenticated) {
+        console.log('Reconexión automática porque ya está autenticado...');
+        setTimeout(() => connectWebSocket(username, pin), 5000);
       }
     };
   };
 
-  // Inicializar aplicación y manejar conexión
+  // 🔹 Cargar flujos almacenados en el dispositivo al iniciar
   useEffect(() => {
     const initializeApp = async () => {
-      setIsLoading(true);
-
       const storedFlows = await loadFlowsFromStorage();
       if (storedFlows) {
         setFlows(storedFlows);
-        setIsLoading(false);
       }
 
       const netInfo = await NetInfo.fetch();
       setIsConnected(netInfo.isConnected);
 
-      if (netInfo.isConnected) {
-        connectWebSocket();
-      } else if (!storedFlows) {
-        setIsLoading(false);
-      }
-
       const unsubscribe = NetInfo.addEventListener(state => {
         setIsConnected(state.isConnected);
-        if (state.isConnected && (!ws.current || ws.current.readyState === WebSocket.CLOSED)) {
-          connectWebSocket();
-        }
       });
 
       return () => {
@@ -450,6 +446,23 @@ function MainApp() {
     };
     syncData();
   }, [isConnected]);
+
+  // 🔹 Manejo del login
+  const handleLogin = () => {
+    if (!username || !pin) {
+      Alert.alert('Error', 'Por favor, ingresa usuario y PIN.');
+      return;
+    }
+
+    // Cerrar socket previo si existe
+    if (ws.current) {
+      ws.current.close();
+      ws.current = null;
+    }
+
+    // Abrir conexión con credenciales
+    connectWebSocket(username, pin);
+  };
 
   // Seleccionar un flujo
   const handleSelectFlow = flow => {
@@ -582,10 +595,35 @@ function MainApp() {
     getLatestReport(selectedFlow.id, setSelectedReport);
   };
 
-  // Pantalla de carga
+  // Pantalla de login
+  if (!isAuthenticated) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top, justifyContent: 'center' }]}>
+        <View style={styles.loginCard}>
+          <Feather name="user" size={60} color="#007AFF" style={styles.loginIcon} />
+
+          <Text style={styles.loginTitle}>Inicio de Sesión</Text>
+
+          <TextInput style={styles.loginInput} value={username} onChangeText={setUsername} placeholder="Usuario" autoCapitalize="none" />
+          <TextInput style={styles.loginInput} value={pin} onChangeText={setPin} placeholder="PIN" secureTextEntry keyboardType="numeric" />
+
+          <TouchableOpacity
+            style={[styles.loginButton, (!username || !pin) && styles.loginButtonDisabled]}
+            onPress={handleLogin}
+            activeOpacity={0.7}
+            disabled={!username || !pin} // Desactivar si los campos están vacíos
+          >
+            <Text style={styles.loginButtonText}>Iniciar Sesión</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // Pantalla de carga tras login válido
   if (isLoading) {
     return (
-      <View style={[styles.container, { paddingTop: insets.top }, styles.loadingContainer]}>
+      <View style={[styles.container, styles.loadingContainer]}>
         <ActivityIndicator size="large" color="#007AFF" />
         <Text style={styles.loadingText}>Cargando flujos...</Text>
       </View>
@@ -786,7 +824,7 @@ function MainApp() {
   if (currentStepId === '0') {
     const formattedHistory = history.map(item => ({
       ...item,
-      timestamp: formatTimestamp(item.timestamp || history[0]?.timestamp || new Date().toISOString()), // Usar timestamp del historial o general
+      timestamp: formatTimestamp(item.timestamp || history[0]?.timestamp || new Date().toISOString()),
     }));
     const itemStyle = getItemStyle(history);
 
@@ -858,15 +896,7 @@ function MainApp() {
             style={[
               styles.messageBubble,
               message.isUser ? styles.userBubble : styles.assistantBubble,
-              {
-                alignSelf: message.isUser ? 'flex-end' : 'flex-start',
-                borderRadius: 10,
-                shadowColor: '#000',
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.1,
-                shadowRadius: 4,
-                elevation: 2,
-              },
+              { alignSelf: message.isUser ? 'flex-end' : 'flex-start' },
             ]}
           >
             <Text style={[styles.messageText, message.isUser ? styles.userText : styles.assistantText, { fontSize: 16, lineHeight: 24 }]}>

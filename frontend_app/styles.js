@@ -12,6 +12,65 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
   },
 
+  // Pantalla de login
+  loginCard: {
+    backgroundColor: '#FFFFFF',
+    padding: 20,
+    borderRadius: 15,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 5,
+    width: '85%',
+    alignSelf: 'center',
+  },
+  loginIcon: {
+    marginBottom: 15,
+  },
+  loginTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#007AFF',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  loginInput: {
+    width: '100%',
+    height: 50,
+    borderColor: '#B0BEC5',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 15,
+    marginBottom: 15,
+    fontSize: 16,
+    backgroundColor: '#F5F7FA',
+  },
+  loginButton: {
+    width: '100%',
+    height: 50,
+    backgroundColor: '#007AFF',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  loginButtonDisabled: {
+    backgroundColor: '#B0BEC5',
+  },
+  loginButtonText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  errorText: {
+    color: '#F44336',
+    fontSize: 14,
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+
   // Pantalla de carga
   loadingContainer: {
     flex: 1,
