@@ -1,5 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ScrollView, View, Text, TouchableOpacity, FlatList, TextInput, Alert, ActivityIndicator } from 'react-native';
+import {
+  ScrollView,
+  View,
+  Text,
+  TouchableOpacity,
+  FlatList,
+  TextInput,
+  Alert,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import Feather from '@expo/vector-icons/Feather';
@@ -7,7 +19,7 @@ import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-
 import styles from './styles';
 
 // Configuración WebSocket
-const WS_URL = 'ws://localhost:8080'; // Cambiar la IP por localhost si haces pruebas en el ordenador
+const WS_URL = 'ws://192.168.1.20:8080'; // Cambiar la IP por localhost si haces pruebas en el ordenador
 
 // Función para procesar un flujo y calcular duración estimada
 function processFlow(flow) {
@@ -207,7 +219,6 @@ async function saveFlowsToStorage(flows) {
       timestamp: new Date().toISOString(),
     };
     await AsyncStorage.setItem('flows', JSON.stringify(data));
-    console.log('Flujos guardados en AsyncStorage.');
   } catch (error) {
     console.log('Error guardando flujos:', error);
   }
@@ -291,6 +302,50 @@ const getItemStyle = history => {
   return lastStep === 'InfPos' ? styles.greenItem : styles.redItem;
 };
 
+// Función para guardar credenciales en SecureStore
+const storeCredentials = async (username, pin) => {
+  try {
+    const key = 'credentials_' + btoa(username); // Clave única por usuario
+    await SecureStore.setItemAsync(key, JSON.stringify({ username, pin }), {
+      keychainAccessible: SecureStore.WHEN_UNLOCKED,
+    });
+    console.log('Credenciales almacenadas de forma segura para:', username);
+  } catch (error) {
+    console.log('Error guardando credenciales:', error);
+  }
+};
+
+// Función para cargar credenciales desde SecureStore
+const loadCredentials = async () => {
+  try {
+    const keys = await SecureStore.getAllKeysAsync();
+    const credentialKeys = keys.filter(key => key.startsWith('credentials_'));
+    if (credentialKeys.length > 0) {
+      const credentialData = await SecureStore.getItemAsync(credentialKeys[0]);
+      if (credentialData) {
+        const { username, pin } = JSON.parse(credentialData);
+        return { username, pin };
+      }
+    }
+    return null;
+  } catch (error) {
+    console.log('Error cargando credenciales:', error);
+    return null;
+  }
+};
+
+// Función para eliminar credenciales
+const clearCredentials = async () => {
+  try {
+    const keys = await SecureStore.getAllKeysAsync();
+    const credentialKeys = keys.filter(key => key.startsWith('credentials_'));
+    await Promise.all(credentialKeys.map(key => SecureStore.deleteItemAsync(key)));
+    console.log('Credenciales eliminadas');
+  } catch (error) {
+    console.log('Error eliminando credenciales:', error);
+  }
+};
+
 function MainApp() {
   const insets = useSafeAreaInsets();
 
@@ -315,42 +370,48 @@ function MainApp() {
 
   // 🔹 Función para conectar WebSocket con credenciales
   const connectWebSocket = (user, userPin) => {
+    if (ws.current) {
+      ws.current.close();
+      ws.current = null;
+    }
     ws.current = new WebSocket(WS_URL);
 
     ws.current.onopen = () => {
       console.log('WebSocket conectado');
       setIsConnected(true);
-
-      // Enviar credenciales al abrir la conexión
-      ws.current.send(JSON.stringify({ type: 'LOGIN', data: { username: user, pin: userPin } }));
+      if (user && userPin) {
+        ws.current.send(JSON.stringify({ type: 'LOGIN', data: { username: user, pin: userPin } }));
+      }
       syncPendingReports(ws.current);
     };
 
     ws.current.onmessage = event => {
       try {
         const message = JSON.parse(event.data);
-        console.log('Mensaje recibido del backend:', message);
-
         switch (message.type) {
           case 'AUTH_OK':
-            console.log('Autenticación exitosa');
+            console.log('Autenticación exitosa con backend');
             setIsAuthenticated(true);
-            setIsLoading(true); // mostrar "Cargando..." tras login
+            if (!username || !pin) {
+              setUsername(user);
+              setPin(userPin);
+              storeCredentials(user, userPin);
+            }
             ws.current.send(JSON.stringify({ type: 'GET_FLOWS' }));
             break;
 
           case 'AUTH_ERROR':
-            console.log('Error de autenticación: Credenciales incorrectas');
-            Alert.alert('Error', 'Usuario o PIN incorrectos.');
-            setIsAuthenticated(false);
-            setIsLoading(false);
-            ws.current.close();
+            console.log('Error de autenticación con backend: Credenciales incorrectas');
+            if (user && userPin) {
+              clearCredentials();
+            }
+            Alert.alert('Error', 'Usuario o PIN incorrectos en el backend. Usando modo offline.');
             break;
 
           case 'FLOW':
             setFlows(prev => {
               const updated = [...prev.filter(f => f.id !== message.data.id), message.data];
-              saveFlowsToStorage(updated); // actualizar almacenamiento local
+              saveFlowsToStorage(updated);
               return updated.sort((a, b) => a.title[0].text.localeCompare(b.title[0].text));
             });
             break;
@@ -358,7 +419,7 @@ function MainApp() {
           case 'FLOW_REMOVED':
             setFlows(prev => {
               const updated = prev.filter(f => f.id !== message.data);
-              saveFlowsToStorage(updated); // actualizar almacenamiento local
+              saveFlowsToStorage(updated);
               return updated;
             });
             break;
@@ -383,9 +444,6 @@ function MainApp() {
           case 'ERROR':
             console.log(`Error del servidor: ${message.data}`);
             break;
-
-          default:
-            console.log(`Mensaje desconocido: ${message.type}`);
         }
       } catch (err) {
         console.log('Error parsing WebSocket message:', err);
@@ -400,17 +458,34 @@ function MainApp() {
     ws.current.onclose = event => {
       console.log('WebSocket desconectado', event);
       setIsConnected(false);
-
-      if (isAuthenticated) {
-        console.log('Reconexión automática porque ya está autenticado...');
-        setTimeout(() => connectWebSocket(username, pin), 5000);
+      if (reconnectAttempts.current < maxReconnectAttempts) {
+        reconnectAttempts.current += 1;
+        console.log(`Reconexión intento ${reconnectAttempts.current}/${maxReconnectAttempts}`);
+        const reconnectDelay = 5000 * Math.min(reconnectAttempts.current, 3);
+        setTimeout(async () => {
+          const storedCredentials = await loadCredentials();
+          if (storedCredentials) {
+            connectWebSocket(storedCredentials.username, storedCredentials.pin);
+          }
+        }, reconnectDelay);
       }
     };
   };
 
-  // 🔹 Cargar flujos almacenados en el dispositivo al iniciar
+  // 🔹 Cargar credenciales y flujos almacenados al iniciar
   useEffect(() => {
     const initializeApp = async () => {
+      const storedCredentials = await loadCredentials();
+      if (storedCredentials) {
+        setUsername(storedCredentials.username);
+        setPin(storedCredentials.pin);
+        setCredentialExpiration(storedCredentials.expiration); // Guardar la fecha de expiración
+        setIsAuthenticated(true); // Autenticación local basada en credenciales almacenadas
+      } else if (isConnected) {
+        // Si no hay credenciales y hay conexión, forzar login
+        setIsAuthenticated(false);
+      }
+
       const storedFlows = await loadFlowsFromStorage();
       if (storedFlows) {
         setFlows(storedFlows);
@@ -435,13 +510,16 @@ function MainApp() {
     initializeApp();
   }, []);
 
-  // Sincronizar informes al reconectar
+  // Sincronizar informes y reconectar al cambiar la conexión
   useEffect(() => {
     const syncData = async () => {
-      if (isConnected && ws.current && ws.current.readyState === WebSocket.OPEN) {
-        await syncPendingReports(ws.current); // Esperar a que se complete
-      } else if (isConnected && (!ws.current || ws.current.readyState === WebSocket.CLOSED)) {
-        connectWebSocket(); // Reconectar si es necesario
+      if (isConnected && (!ws.current || ws.current.readyState === WebSocket.CLOSED)) {
+        const storedCredentials = await loadCredentials();
+        if (storedCredentials) {
+          connectWebSocket(storedCredentials.username, storedCredentials.pin);
+        }
+      } else if (isConnected && ws.current && ws.current.readyState === WebSocket.OPEN) {
+        await syncPendingReports(ws.current);
       }
     };
     syncData();
@@ -453,15 +531,11 @@ function MainApp() {
       Alert.alert('Error', 'Por favor, ingresa usuario y PIN.');
       return;
     }
-
-    // Cerrar socket previo si existe
-    if (ws.current) {
-      ws.current.close();
-      ws.current = null;
+    setIsAuthenticated(true); // Autenticación local inmediata
+    storeCredentials(username, pin); // Guardar credenciales de forma segura con caducidad de 1 minuto
+    if (isConnected) {
+      connectWebSocket(username, pin); // Intentar autenticación con backend si hay conexión
     }
-
-    // Abrir conexión con credenciales
-    connectWebSocket(username, pin);
   };
 
   // Seleccionar un flujo
@@ -598,25 +672,43 @@ function MainApp() {
   // Pantalla de login
   if (!isAuthenticated) {
     return (
-      <View style={[styles.container, { paddingTop: insets.top, justifyContent: 'center' }]}>
-        <View style={styles.loginCard}>
-          <Feather name="user" size={60} color="#007AFF" style={styles.loginIcon} />
-
-          <Text style={styles.loginTitle}>Inicio de Sesión</Text>
-
-          <TextInput style={styles.loginInput} value={username} onChangeText={setUsername} placeholder="Usuario" autoCapitalize="none" />
-          <TextInput style={styles.loginInput} value={pin} onChangeText={setPin} placeholder="PIN" secureTextEntry keyboardType="numeric" />
-
-          <TouchableOpacity
-            style={[styles.loginButton, (!username || !pin) && styles.loginButtonDisabled]}
-            onPress={handleLogin}
-            activeOpacity={0.7}
-            disabled={!username || !pin} // Desactivar si los campos están vacíos
-          >
-            <Text style={styles.loginButtonText}>Iniciar Sesión</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'} // Ajuste automático para iOS y Android
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0} // Ajuste fino para el offset del teclado
+        style={{ flex: 1 }}
+      >
+        <SafeAreaView style={[styles.container, { paddingTop: insets.top, justifyContent: 'center', flex: 1 }]}>
+          <View style={styles.loginCard}>
+            <Feather name="user" size={60} color="#007AFF" style={styles.loginIcon} />
+            <Text style={styles.loginTitle}>Inicio de Sesión</Text>
+            <TextInput
+              style={styles.loginInput}
+              value={username}
+              onChangeText={setUsername}
+              placeholder="Usuario"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <TextInput
+              style={styles.loginInput}
+              value={pin}
+              onChangeText={setPin}
+              placeholder="PIN"
+              secureTextEntry
+              keyboardType="numeric"
+              autoCorrect={false}
+            />
+            <TouchableOpacity
+              style={[styles.loginButton, (!username || !pin) && styles.loginButtonDisabled]}
+              onPress={handleLogin}
+              activeOpacity={0.7}
+              disabled={!username || !pin}
+            >
+              <Text style={styles.loginButtonText}>Iniciar Sesión</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </KeyboardAvoidingView>
     );
   }
 
