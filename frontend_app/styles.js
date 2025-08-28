@@ -256,7 +256,7 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     marginVertical: 5,
     alignItems: 'center',
-    backgroundColor: '#BBDEFB',
+    backgroundColor: '#2196F3', // Azul vivo cuando está habilitado
   },
   optionsContainer: {
     paddingHorizontal: 10,

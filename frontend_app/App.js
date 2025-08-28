@@ -5,6 +5,7 @@ import NetInfo from '@react-native-community/netinfo';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Importación de funciones
+import { processFlow, parseOptions, cleanAssistantMessage, findStep, findNextStep } from './utils/functions';
 import {
   saveReport,
   markReportAsSynchronized,
@@ -13,14 +14,9 @@ import {
   clearReportsWithAlert,
   saveFlowsToStorage,
   loadFlowsFromStorage,
-  storeCredentials,
-  loadCredentials,
-  clearCredentials,
 } from './services/storage';
-import { processFlow, parseOptions, cleanAssistantMessage, findStep, findNextStep } from './utils/functions';
 
 // Importación de pantallas
-import LoginScreen from './screens/LoginScreen';
 import LoadingScreen from './screens/LoadingScreen';
 import FlowSelectionScreen from './screens/FlowSelectionScreen';
 import FlowDescriptionScreen from './screens/FlowDescriptionScreen';
@@ -30,7 +26,8 @@ import FinalScreen from './screens/FinalScreen';
 import ChatScreen from './screens/ChatScreen';
 
 // Configuración WebSocket
-const WS_URL = 'ws://localhost:8080'; // Cambiar la IP por localhost si haces pruebas en el ordenador
+const WS_URL = 'ws://192.168.1.20:8080'; //Cambiar la IP por localhost si hacemos pruebas en el ordenador
+const PIN = '123456';
 
 // Función para sincronizar informes pendientes al recuperar la conexión
 async function syncPendingReports(ws) {
@@ -64,92 +61,75 @@ function MainApp() {
   const [reports, setReports] = useState([]);
   const [showReports, setShowReports] = useState(false);
   const [selectedReport, setSelectedReport] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [isConnected, setIsConnected] = useState(false);
-  const [username, setUsername] = useState('');
-  const [pin, setPin] = useState('');
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const ws = useRef(null);
-  const flatListRef = useRef(null);
   const reconnectAttempts = useRef(0);
   const maxReconnectAttempts = 12;
+  const flatListRef = useRef(null);
 
-  // 🔹 Función para conectar WebSocket con credenciales
-  const connectWebSocket = (user, userPin) => {
-    if (ws.current) {
-      ws.current.close();
-      ws.current = null;
+  const connectWebSocket = () => {
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      return; // Evitar conexiones duplicadas
     }
+
     ws.current = new WebSocket(WS_URL);
 
     ws.current.onopen = () => {
       console.log('WebSocket conectado');
+      reconnectAttempts.current = 0; // Reiniciar intentos al conectar
       setIsConnected(true);
-      if (user && userPin) {
-        ws.current.send(JSON.stringify({ type: 'LOGIN', data: { username: user, pin: userPin } }));
-      }
-      syncPendingReports(ws.current);
+      ws.current.send(JSON.stringify({ type: 'PIN', data: PIN }));
+      // Sincronizar informes pendientes después de autenticación
+      syncPendingReports(ws.current); // Pasar ws.current explícitamente
     };
 
     ws.current.onmessage = event => {
       try {
         const message = JSON.parse(event.data);
+        console.log('Mensaje recibido:', message); // Depuración
         switch (message.type) {
           case 'AUTH_OK':
-            console.log('Autenticación exitosa con backend');
-            setIsAuthenticated(true);
-            if (!username || !pin) {
-              setUsername(user);
-              setPin(userPin);
-              storeCredentials(user, userPin);
-            }
+            console.log('Autenticación exitosa');
             ws.current.send(JSON.stringify({ type: 'GET_FLOWS' }));
             break;
-
-          case 'AUTH_ERROR':
-            console.log('Error de autenticación con backend: Credenciales incorrectas');
-            if (user && userPin) {
-              clearCredentials();
-            }
-            Alert.alert('Error', 'Usuario o PIN incorrectos en el backend. Usando modo offline.');
-            break;
-
           case 'FLOW':
-            setFlows(prev => {
-              const updated = [...prev.filter(f => f.id !== message.data.id), message.data];
-              saveFlowsToStorage(updated);
-              return updated.sort((a, b) => a.title[0].text.localeCompare(b.title[0].text));
+            setFlows(prevFlows => {
+              const updatedFlows = [...prevFlows.filter(f => f.id !== message.data.id), message.data];
+              return updatedFlows.sort((a, b) => a.title[0].text.localeCompare(b.title[0].text));
             });
             break;
-
           case 'FLOW_REMOVED':
-            setFlows(prev => {
-              const updated = prev.filter(f => f.id !== message.data);
-              saveFlowsToStorage(updated);
-              return updated;
+            setFlows(prevFlows => {
+              const updatedFlows = prevFlows.filter(f => f.id !== message.data);
+              saveFlowsToStorage(updatedFlows);
+              return updatedFlows.sort((a, b) => a.title[0].text.localeCompare(b.title[0].text));
             });
             break;
-
           case 'ALL_FLOWS_SENT':
+            saveFlowsToStorage(flows);
             setIsLoading(false);
             break;
-
           case 'UPDATE_FLOWS':
-            console.log('Actualización de flujos detectada...');
+            console.log('Actualización de flujos detectada, procesando cambios en tiempo real...');
             break;
-
           case 'REPORT_SAVED':
             console.log(`Informe guardado en backend: ${message.data}`);
-            markReportAsSynchronized(message.data).catch(console.log);
+            markReportAsSynchronized(message.data).catch(error => console.log('Error marking report as synchronized:', error));
             break;
-
           case 'PARTIAL_FLOW_SAVED':
             console.log(`Flujo parcial guardado: ${message.data}`);
             break;
-
+          case 'AUTH_ERROR':
+            console.log('Error de autenticación: PIN incorrecto');
+            setIsConnected(false);
+            ws.current.close();
+            break;
           case 'ERROR':
             console.log(`Error del servidor: ${message.data}`);
             break;
+          default:
+            console.log(`Mensaje desconocido: ${message.type}`);
         }
       } catch (err) {
         console.log('Error parsing WebSocket message:', err);
@@ -164,44 +144,44 @@ function MainApp() {
     ws.current.onclose = event => {
       console.log('WebSocket desconectado', event);
       setIsConnected(false);
+
+      // Lógica de reconexión con backoff exponencial
       if (reconnectAttempts.current < maxReconnectAttempts) {
+        const delay = Math.min(Math.pow(2, reconnectAttempts.current) * 60 * 1000, 6 * 60 * 60 * 1000); // 1min, 2min, 4min, ... max 6h
+        console.log(`Reintentando conexión en ${delay / 60000} segundos...`);
         reconnectAttempts.current += 1;
-        console.log(`Reconexión intento ${reconnectAttempts.current}/${maxReconnectAttempts}`);
-        const reconnectDelay = 5000 * Math.min(reconnectAttempts.current, 3);
-        setTimeout(async () => {
-          const storedCredentials = await loadCredentials();
-          if (storedCredentials) {
-            connectWebSocket(storedCredentials.username, storedCredentials.pin);
-          }
-        }, reconnectDelay);
+        setTimeout(connectWebSocket, delay);
+      } else {
+        console.log('Máximo de reintentos alcanzado. Conexión fallida.');
       }
     };
   };
 
-  // 🔹 Cargar credenciales y flujos almacenados al iniciar
+  // Inicializar aplicación y manejar conexión
   useEffect(() => {
     const initializeApp = async () => {
-      const storedCredentials = await loadCredentials();
-      if (storedCredentials) {
-        setUsername(storedCredentials.username);
-        setPin(storedCredentials.pin);
-        setCredentialExpiration(storedCredentials.expiration); // Guardar la fecha de expiración
-        setIsAuthenticated(true); // Autenticación local basada en credenciales almacenadas
-      } else if (isConnected) {
-        // Si no hay credenciales y hay conexión, forzar login
-        setIsAuthenticated(false);
-      }
+      setIsLoading(true);
 
       const storedFlows = await loadFlowsFromStorage();
       if (storedFlows) {
         setFlows(storedFlows);
+        setIsLoading(false);
       }
 
       const netInfo = await NetInfo.fetch();
       setIsConnected(netInfo.isConnected);
 
+      if (netInfo.isConnected) {
+        connectWebSocket();
+      } else if (!storedFlows) {
+        setIsLoading(false);
+      }
+
       const unsubscribe = NetInfo.addEventListener(state => {
         setIsConnected(state.isConnected);
+        if (state.isConnected && (!ws.current || ws.current.readyState === WebSocket.CLOSED)) {
+          connectWebSocket();
+        }
       });
 
       return () => {
@@ -216,33 +196,17 @@ function MainApp() {
     initializeApp();
   }, []);
 
-  // Sincronizar informes y reconectar al cambiar la conexión
+  // Sincronizar informes al reconectar
   useEffect(() => {
     const syncData = async () => {
-      if (isConnected && (!ws.current || ws.current.readyState === WebSocket.CLOSED)) {
-        const storedCredentials = await loadCredentials();
-        if (storedCredentials) {
-          connectWebSocket(storedCredentials.username, storedCredentials.pin);
-        }
-      } else if (isConnected && ws.current && ws.current.readyState === WebSocket.OPEN) {
-        await syncPendingReports(ws.current);
+      if (isConnected && ws.current && ws.current.readyState === WebSocket.OPEN) {
+        await syncPendingReports(ws.current); // Esperar a que se complete
+      } else if (isConnected && (!ws.current || ws.current.readyState === WebSocket.CLOSED)) {
+        connectWebSocket(); // Reconectar si es necesario
       }
     };
     syncData();
   }, [isConnected]);
-
-  // 🔹 Manejo del login
-  const handleLogin = () => {
-    if (!username || !pin) {
-      Alert.alert('Error', 'Por favor, ingresa usuario y PIN.');
-      return;
-    }
-    setIsAuthenticated(true); // Autenticación local inmediata
-    storeCredentials(username, pin); // Guardar credenciales de forma segura con caducidad de 1 minuto
-    if (isConnected) {
-      connectWebSocket(username, pin); // Intentar autenticación con backend si hay conexión
-    }
-  };
 
   // Seleccionar un flujo
   const handleSelectFlow = flow => {
@@ -366,7 +330,7 @@ function MainApp() {
 
   // Mostrar pantalla de informes filtrados por flujo o todos
   const handleShowReports = (flowId = null) => {
-    getReports(setReports, flowId);
+    getReports(setReports, flowId, isConnected);
     setShowReports(true);
   };
 
@@ -375,14 +339,7 @@ function MainApp() {
     getLatestReport(selectedFlow.id, setSelectedReport);
   };
 
-  // Pantalla de login
-  if (!isAuthenticated) {
-    return (
-      <LoginScreen username={username} setUsername={setUsername} pin={pin} setPin={setPin} handleLogin={handleLogin} insets={insets} />
-    );
-  }
-
-  // Pantalla de carga tras login válido
+  // Pantalla de carga
   if (isLoading) {
     return <LoadingScreen />;
   }
@@ -411,7 +368,7 @@ function MainApp() {
         handleShowLatestReport={handleShowLatestReport}
         isConnected={isConnected}
         insets={insets}
-        onBack={() => setSelectedFlow(null)} // Pasar la función como prop
+        onBack={() => setSelectedFlow(null)}
       />
     );
   }
@@ -435,7 +392,7 @@ function MainApp() {
     return (
       <LastReportScreen
         selectedReport={selectedReport}
-        selectedFlow={selectedFlow} // Añadido para mostrar el nombre del flujo en el título
+        selectedFlow={selectedFlow}
         setSelectedReport={setSelectedReport}
         isConnected={isConnected}
         insets={insets}
@@ -462,25 +419,29 @@ function MainApp() {
   }
 
   // Pantalla de chat
-  if (currentStepId) {
-    return (
-      <ChatScreen
-        currentStepId={currentStepId}
-        selectedFlow={selectedFlow}
-        messages={messages}
-        setMessages={setMessages}
-        inputValue={inputValue}
-        setInputValue={setInputValue}
-        handleOptionPress={handleOptionPress}
-        handleContinue={handleContinue}
-        setCurrentStepId={setCurrentStepId}
-        setHistory={setHistory}
-        flatListRef={flatListRef}
-        isConnected={isConnected}
-        insets={insets}
-      />
-    );
-  }
+  const step = findStep(currentStepId, selectedFlow);
+  const options = step
+    ? parseOptions(step.question[0].text, processFlow(selectedFlow).stepNameToId, processFlow(selectedFlow).graph[currentStepId] || [])
+    : [];
+  return (
+    <ChatScreen
+      currentStepId={currentStepId}
+      selectedFlow={selectedFlow}
+      messages={messages}
+      setMessages={setMessages}
+      inputValue={inputValue}
+      setInputValue={setInputValue}
+      handleOptionPress={handleOptionPress}
+      handleContinue={handleContinue}
+      setCurrentStepId={setCurrentStepId}
+      setHistory={setHistory}
+      flatListRef={flatListRef}
+      step={step}
+      options={options}
+      isConnected={isConnected}
+      insets={insets}
+    />
+  );
 }
 
 export default function App() {

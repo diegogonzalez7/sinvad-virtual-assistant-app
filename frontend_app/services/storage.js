@@ -1,5 +1,4 @@
 import { Alert } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Función para guardar informe en AsyncStorage
@@ -39,7 +38,7 @@ export async function markReportAsSynchronized(timestamp) {
 }
 
 // Función para obtener informes
-export async function getReports(setReports, flowId = null) {
+export async function getReports(setReports, flowId = null, isConnected = false) {
   try {
     const reports = JSON.parse((await AsyncStorage.getItem('reports')) || '[]');
     const now = new Date();
@@ -86,16 +85,25 @@ export async function getLatestReport(flowId, setSelectedReport) {
   }
 }
 
-// Función para limpiar todos los informes (con alerta)
+// Función para limpiar solo los informes sincronizados (con alerta)
 export async function clearReportsWithAlert(setReports) {
   try {
     const reports = JSON.parse((await AsyncStorage.getItem('reports')) || '[]');
     if (reports.length > 0) {
-      await AsyncStorage.removeItem('reports'); // Elimina todos los informes
-      setReports([]); // Actualiza el estado a vacío
-      await AsyncStorage.setItem('lastCleanup', new Date().toISOString()); // Actualizar la última limpieza
-      console.log('Todos los informes sincronizados borrados y última limpieza registrada.');
-      Alert.alert('Éxito', 'Todos los informes han sido eliminados.');
+      const synchronizedReports = reports.filter(report => report.estado === 'Sincronizado');
+      const pendingReports = reports.filter(report => report.estado === 'Pendiente');
+
+      if (synchronizedReports.length > 0) {
+        // Guardar solo los informes pendientes
+        await AsyncStorage.setItem('reports', JSON.stringify(pendingReports));
+        setReports(pendingReports); // Actualiza el estado con los informes pendientes
+        await AsyncStorage.setItem('lastCleanup', new Date().toISOString()); // Actualizar la última limpieza
+        console.log('Informes sincronizados borrados y última limpieza registrada.');
+        Alert.alert('Éxito', 'Los informes sincronizados han sido eliminados.');
+      } else {
+        console.log('No hay informes sincronizados para borrar.');
+        Alert.alert('Información', 'No hay informes sincronizados para eliminar.');
+      }
     } else {
       console.log('No hay informes para borrar.');
       Alert.alert('Información', 'No hay informes para eliminar.');
@@ -114,6 +122,7 @@ export async function saveFlowsToStorage(flows) {
       timestamp: new Date().toISOString(),
     };
     await AsyncStorage.setItem('flows', JSON.stringify(data));
+    console.log('Flujos guardados en AsyncStorage.');
   } catch (error) {
     console.log('Error guardando flujos:', error);
   }
@@ -133,47 +142,3 @@ export async function loadFlowsFromStorage() {
     return null;
   }
 }
-
-// Función para guardar credenciales en SecureStore
-export const storeCredentials = async (username, pin) => {
-  try {
-    const key = 'credentials_' + btoa(username); // Clave única por usuario
-    await SecureStore.setItemAsync(key, JSON.stringify({ username, pin }), {
-      keychainAccessible: SecureStore.WHEN_UNLOCKED,
-    });
-    console.log('Credenciales almacenadas de forma segura para:', username);
-  } catch (error) {
-    console.log('Error guardando credenciales:', error);
-  }
-};
-
-// Función para cargar credenciales desde SecureStore
-export const loadCredentials = async () => {
-  try {
-    const keys = await SecureStore.getAllKeysAsync();
-    const credentialKeys = keys.filter(key => key.startsWith('credentials_'));
-    if (credentialKeys.length > 0) {
-      const credentialData = await SecureStore.getItemAsync(credentialKeys[0]);
-      if (credentialData) {
-        const { username, pin } = JSON.parse(credentialData);
-        return { username, pin };
-      }
-    }
-    return null;
-  } catch (error) {
-    console.log('Error cargando credenciales:', error);
-    return null;
-  }
-};
-
-// Función para eliminar credenciales
-export const clearCredentials = async () => {
-  try {
-    const keys = await SecureStore.getAllKeysAsync();
-    const credentialKeys = keys.filter(key => key.startsWith('credentials_'));
-    await Promise.all(credentialKeys.map(key => SecureStore.deleteItemAsync(key)));
-    console.log('Credenciales eliminadas');
-  } catch (error) {
-    console.log('Error eliminando credenciales:', error);
-  }
-};
