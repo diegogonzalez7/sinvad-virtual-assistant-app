@@ -27,17 +27,17 @@ import ChatScreen from './screens/ChatScreen';
 
 // Configuración WebSocket
 const WS_URL = 'ws://192.168.1.20:8080'; //Cambiar la IP por localhost si hacemos pruebas en el ordenador
-const PIN = '123456';
+const PIN = '1234';
 
 // Función para sincronizar informes pendientes al recuperar la conexión
 async function syncPendingReports(ws) {
   try {
     const reports = JSON.parse((await AsyncStorage.getItem('reports')) || '[]');
     const pendingReports = reports.filter(report => report.estado === 'Pendiente');
-    console.log('Informes pendientes a sincronizar:', pendingReports); // Depuración
+    console.log('Informes pendientes a sincronizar:', pendingReports.length); // Depuración concisa
     if (pendingReports.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
       for (const report of pendingReports) {
-        console.log('Enviando informe:', report); // Depuración
+        console.log('Enviando informe: flowId=', report.flowId, 'timestamp=', report.timestamp); // Depuración concisa
         ws.send(JSON.stringify({ type: 'REPORT', data: report }));
         // Opcional: Esperar confirmación (necesitaría un callback o timeout)
       }
@@ -45,7 +45,7 @@ async function syncPendingReports(ws) {
       console.log('No hay informes pendientes o WebSocket no está abierto');
     }
   } catch (error) {
-    console.log('Error synchronizing pending reports:', error);
+    console.log('Error synchronizing pending reports:', error.message);
   }
 }
 
@@ -63,43 +63,50 @@ function MainApp() {
   const [selectedReport, setSelectedReport] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isConnected, setIsConnected] = useState(false);
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
   const ws = useRef(null);
   const reconnectAttempts = useRef(0);
   const maxReconnectAttempts = 12;
   const flatListRef = useRef(null);
 
   const connectWebSocket = () => {
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      return; // Evitar conexiones duplicadas
+    if (isAuthenticating || (ws.current && ws.current.readyState === WebSocket.OPEN)) return;
+
+    if (ws.current) {
+      ws.current.close();
+      ws.current = null;
     }
 
+    setIsAuthenticating(true);
     ws.current = new WebSocket(WS_URL);
 
     ws.current.onopen = () => {
       console.log('WebSocket conectado');
-      reconnectAttempts.current = 0; // Reiniciar intentos al conectar
+      reconnectAttempts.current = 0;
       setIsConnected(true);
-      ws.current.send(JSON.stringify({ type: 'PIN', data: PIN }));
-      // Sincronizar informes pendientes después de autenticación
-      syncPendingReports(ws.current); // Pasar ws.current explícitamente
+      ws.current.send(JSON.stringify({ type: 'LOGIN', data: { username: 'admin', pin: '1234' } }));
+      syncPendingReports(ws.current);
     };
 
     ws.current.onmessage = event => {
       try {
         const message = JSON.parse(event.data);
-        console.log('Mensaje recibido:', message); // Depuración
+        console.log('Mensaje recibido del servidor:', message.type); // Log general conciso
         switch (message.type) {
           case 'AUTH_OK':
             console.log('Autenticación exitosa');
+            setIsAuthenticating(false); // Resetear bandera tras autenticación
             ws.current.send(JSON.stringify({ type: 'GET_FLOWS' }));
             break;
           case 'FLOW':
+            console.log('Recibido FLOW: id=', message.data.id, 'title=', message.data.title[0]?.text, 'stepID=', message.data.stepID); // Log conciso
             setFlows(prevFlows => {
               const updatedFlows = [...prevFlows.filter(f => f.id !== message.data.id), message.data];
               return updatedFlows.sort((a, b) => a.title[0].text.localeCompare(b.title[0].text));
             });
             break;
           case 'FLOW_REMOVED':
+            console.log('Recibido FLOW_REMOVED: id=', message.data); // Log añadido
             setFlows(prevFlows => {
               const updatedFlows = prevFlows.filter(f => f.id !== message.data);
               saveFlowsToStorage(updatedFlows);
@@ -107,6 +114,7 @@ function MainApp() {
             });
             break;
           case 'ALL_FLOWS_SENT':
+            console.log('Recibido ALL_FLOWS_SENT, guardando flujos'); // Log conciso
             saveFlowsToStorage(flows);
             setIsLoading(false);
             break;
@@ -114,11 +122,11 @@ function MainApp() {
             console.log('Actualización de flujos detectada, procesando cambios en tiempo real...');
             break;
           case 'REPORT_SAVED':
-            console.log(`Informe guardado en backend: ${message.data}`);
-            markReportAsSynchronized(message.data).catch(error => console.log('Error marking report as synchronized:', error));
+            console.log('Confirmación recibida: REPORT_SAVED para timestamp=', message.data);
+            markReportAsSynchronized(message.data).catch(error => console.log('Error marking report as synchronized:', error.message));
             break;
           case 'PARTIAL_FLOW_SAVED':
-            console.log(`Flujo parcial guardado: ${message.data}`);
+            console.log('Confirmación recibida: PARTIAL_FLOW_SAVED para flowId=', message.data);
             break;
           case 'AUTH_ERROR':
             console.log('Error de autenticación: PIN incorrecto');
@@ -132,27 +140,30 @@ function MainApp() {
             console.log(`Mensaje desconocido: ${message.type}`);
         }
       } catch (err) {
-        console.log('Error parsing WebSocket message:', err);
+        console.log('Error parsing WebSocket message:', err.message);
       }
     };
 
     ws.current.onerror = error => {
       console.error('Error WebSocket:', error.message);
       setIsConnected(false);
+      if (reconnectAttempts.current < maxReconnectAttempts) {
+        const delay = Math.min(Math.pow(2, reconnectAttempts.current) * 1000, 300000);
+        console.log(`Reintentando conexión en ${delay / 1000} segundos...`);
+        reconnectAttempts.current += 1;
+        setTimeout(connectWebSocket, delay);
+      }
     };
 
     ws.current.onclose = event => {
-      console.log('WebSocket desconectado', event);
+      console.log('WebSocket desconectado', event.code);
       setIsConnected(false);
-
-      // Lógica de reconexión con backoff exponencial
+      setIsAuthenticating(false); // Resetear bandera en caso de cierre
       if (reconnectAttempts.current < maxReconnectAttempts) {
-        const delay = Math.min(Math.pow(2, reconnectAttempts.current) * 60 * 1000, 6 * 60 * 60 * 1000); // 1min, 2min, 4min, ... max 6h
-        console.log(`Reintentando conexión en ${delay / 60000} segundos...`);
+        const delay = Math.min(Math.pow(2, reconnectAttempts.current) * 1000, 300000);
+        console.log(`Reintentando conexión en ${delay / 1000} segundos...`);
         reconnectAttempts.current += 1;
         setTimeout(connectWebSocket, delay);
-      } else {
-        console.log('Máximo de reintentos alcanzado. Conexión fallida.');
       }
     };
   };
@@ -164,6 +175,7 @@ function MainApp() {
 
       const storedFlows = await loadFlowsFromStorage();
       if (storedFlows) {
+        console.log('Flujos cargados desde AsyncStorage:', storedFlows.length); // Log conciso
         setFlows(storedFlows);
         setIsLoading(false);
       }
@@ -200,9 +212,9 @@ function MainApp() {
   useEffect(() => {
     const syncData = async () => {
       if (isConnected && ws.current && ws.current.readyState === WebSocket.OPEN) {
-        await syncPendingReports(ws.current); // Esperar a que se complete
+        await syncPendingReports(ws.current);
       } else if (isConnected && (!ws.current || ws.current.readyState === WebSocket.CLOSED)) {
-        connectWebSocket(); // Reconectar si es necesario
+        connectWebSocket();
       }
     };
     syncData();
@@ -253,12 +265,12 @@ function MainApp() {
       setInputValue('');
 
       if (isConnected && ws.current && ws.current.readyState === WebSocket.OPEN) {
-        ws.current.send(
-          JSON.stringify({
-            type: 'PARTIALFLOW',
-            data: { flowId: selectedFlow.id, stepId: currentStepId, responses: newHistory },
-          })
-        );
+        const partialFlowMessage = {
+          type: 'PARTIALFLOW',
+          data: { flowId: selectedFlow.id, stepId: currentStepId, responses: newHistory },
+        };
+        console.log('Enviando PARTIALFLOW: flowId=', selectedFlow.id, 'stepId=', currentStepId); // Log conciso
+        ws.current.send(JSON.stringify(partialFlowMessage));
       }
 
       const nextStep = findStep(nextStepId, selectedFlow);
@@ -274,7 +286,9 @@ function MainApp() {
       } else if (nextStepId === '0') {
         saveReport(selectedFlow.id, selectedFlow.title[0].text, newHistory).then(report => {
           if (isConnected && ws.current && ws.current.readyState === WebSocket.OPEN) {
-            ws.current.send(JSON.stringify({ type: 'REPORT', data: report }));
+            const reportMessage = { type: 'REPORT', data: report };
+            console.log('Enviando REPORT: flowId=', report.flowId, 'timestamp=', report.timestamp); // Log conciso
+            ws.current.send(JSON.stringify(reportMessage));
           }
         });
       }
@@ -298,12 +312,12 @@ function MainApp() {
       setCurrentStepId(nextStepId);
 
       if (isConnected && ws.current && ws.current.readyState === WebSocket.OPEN) {
-        ws.current.send(
-          JSON.stringify({
-            type: 'PARTIALFLOW',
-            data: { flowId: selectedFlow.id, stepId: currentStepId, responses: newHistory },
-          })
-        );
+        const partialFlowMessage = {
+          type: 'PARTIALFLOW',
+          data: { flowId: selectedFlow.id, stepId: currentStepId, responses: newHistory },
+        };
+        console.log('Enviando PARTIALFLOW: flowId=', selectedFlow.id, 'stepId=', currentStepId); // Log conciso
+        ws.current.send(JSON.stringify(partialFlowMessage));
       }
 
       const nextStep = findStep(nextStepId, selectedFlow);
@@ -319,7 +333,9 @@ function MainApp() {
       } else if (nextStepId === '0') {
         saveReport(selectedFlow.id, selectedFlow.title[0].text, newHistory).then(report => {
           if (isConnected && ws.current && ws.current.readyState === WebSocket.OPEN) {
-            ws.current.send(JSON.stringify({ type: 'REPORT', data: report }));
+            const reportMessage = { type: 'REPORT', data: report };
+            console.log('Enviando REPORT: flowId=', report.flowId, 'timestamp=', report.timestamp); // Log conciso
+            ws.current.send(JSON.stringify(reportMessage));
           }
         });
       }

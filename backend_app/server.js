@@ -170,7 +170,7 @@ async function updateFlowsForAllClients() {
 // Actualización periódica de flujos (añadidos y eliminados)
 async function startPeriodicUpdates() {
   await updateFlowsForAllClients(); // actualización inicial
-  setInterval(updateFlowsForAllClients, 5 * 60 * 1000); // cada 5 minutos
+  setInterval(updateFlowsForAllClients, 15 * 60 * 1000); // cada 15 minutos
 }
 
 // Servidor WebSocket
@@ -198,9 +198,14 @@ wss.on('connection', ws => {
             console.log('Resultado comparación PIN:', match);
 
             if (match) {
-              ws.isAuthenticated = true; // marcar como autenticado
-              ws.send(JSON.stringify({ type: 'AUTH_OK' }));
-              await updateFlows(ws); // enviar flujos inmediatamente
+              if (!ws.isAuthenticated) {
+                ws.isAuthenticated = true; // Solo autenticar si no lo está
+                ws.send(JSON.stringify({ type: 'AUTH_OK' }));
+                await updateFlows(ws); // Enviar flujos solo tras primera autenticación
+              } else {
+                console.log('Cliente ya autenticado, ignorando nuevo login');
+                ws.send(JSON.stringify({ type: 'AUTH_OK' })); // Reenviar confirmación si ya está autenticado
+              }
             } else {
               ws.send(JSON.stringify({ type: 'AUTH_ERROR', data: 'Usuario o PIN incorrectos' }));
             }
